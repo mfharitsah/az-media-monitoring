@@ -69,17 +69,24 @@ function HeroSection() {
 }
 
 async function TodayList() {
-  const articles = await articleRepo.findToday(50);
+  // Prefer "today" articles (timezone Asia/Jakarta). Edge case: early morning
+  // sebelum cron pagi WIB jalan, today bisa kosong walaupun BQ ada artikel
+  // dari kemarin sore. Fallback ke 10 artikel terbaru supaya home tidak kosong.
+  const todayArticles = await articleRepo.findToday(50);
+  const usingFallback = todayArticles.length === 0;
+  const articles = usingFallback
+    ? await articleRepo.findRecent(10)
+    : todayArticles;
 
   if (articles.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-12 text-center">
         <p className="text-muted-foreground">
-          No news available for today. Try browsing{" "}
+          No articles available yet. Pipeline may not have run — check{" "}
           <Link href="/news" className="font-medium text-primary hover:underline">
-            the last 7 days
-          </Link>
-          .
+            all news
+          </Link>{" "}
+          for any historical data.
         </p>
       </div>
     );
@@ -87,9 +94,17 @@ async function TodayList() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        {articles.length} latest article{articles.length === 1 ? "" : "s"} today
-      </p>
+      {usingFallback ? (
+        <p className="text-sm text-muted-foreground">
+          No news yet for today. Showing the{" "}
+          <span className="font-medium text-foreground">{articles.length} most recent</span>{" "}
+          article{articles.length === 1 ? "" : "s"} instead.
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {articles.length} latest article{articles.length === 1 ? "" : "s"} today
+        </p>
+      )}
       {articles.map((article) => (
         <ArticleCardLandscape key={article.id} article={article} />
       ))}

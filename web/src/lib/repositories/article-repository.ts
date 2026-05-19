@@ -26,6 +26,13 @@ export interface ArticleRepository {
   /** Get articles for today (timezone Asia/Jakarta), ordered by date desc */
   findToday(limit?: number): Promise<Article[]>;
 
+  /**
+   * Get N most recent articles regardless of date — dipakai di landing page
+   * supaya home tidak kosong saat hari sudah berganti tapi belum ada artikel
+   * baru di tanggal hari ini (boundary timezone edge case).
+   */
+  findRecent(limit?: number): Promise<Article[]>;
+
   /** Generic list with filters — dipakai oleh All News page */
   findMany(filters: ArticleListFilters): Promise<{
     items: Article[];

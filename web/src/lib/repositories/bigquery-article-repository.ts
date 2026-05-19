@@ -90,6 +90,22 @@ async function queryFindToday(limit: number): Promise<Article[]> {
   return rows.map(normalizeRow);
 }
 
+async function queryFindRecent(limit: number): Promise<Article[]> {
+  // N most recent by published date — dipakai sebagai fallback di landing
+  // kalau articles_today empty (mis. dini hari sebelum cron pagi WIB jalan).
+  const sql = `
+    SELECT ${SELECT_COLS}
+    FROM ${tbl("articles_latest")}
+    ORDER BY date DESC
+    LIMIT @limit
+  `;
+  const [rows] = await bq().query({
+    query: sql,
+    params: { limit },
+  });
+  return rows.map(normalizeRow);
+}
+
 /**
  * Build WHERE clause + params dari ArticleListFilters. Shared antara
  * queryFindMany (untuk list cards) dan queryFilteredKpi (untuk KPI dinamis)
@@ -340,6 +356,12 @@ export const bigQueryArticleRepository: ArticleRepository = {
   findToday: unstable_cache(
     (limit?: number) => queryFindToday(limit ?? 50),
     ["findToday"],
+    { revalidate: CACHE_TTL_SEC, tags: [CACHE_TAG] },
+  ),
+
+  findRecent: unstable_cache(
+    (limit?: number) => queryFindRecent(limit ?? 10),
+    ["findRecent"],
     { revalidate: CACHE_TTL_SEC, tags: [CACHE_TAG] },
   ),
 

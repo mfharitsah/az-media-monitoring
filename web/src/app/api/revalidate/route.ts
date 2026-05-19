@@ -30,7 +30,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  
   revalidateTag("articles", "max");
 
   return NextResponse.json({

@@ -82,7 +82,10 @@ export function CategoryBreakdownChart({ data }: { data: CategoryBreakdown[] }) 
   // Recharts auto-picks `fill` from each data item — no need for deprecated <Cell>.
   const colored = data.map((d) => ({
     ...d,
-    fill: COLORS.categoryPalette[d.category] ?? "#94a3b8",
+    fill:
+    COLORS.categoryPalette[
+      d.category as keyof typeof COLORS.categoryPalette
+    ] ?? "#94a3b8", // default to slate-400 if category not in palette
   }));
   return (
     <ResponsiveContainer width="100%" height={300}>

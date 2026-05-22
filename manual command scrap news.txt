@@ -1,0 +1,23 @@
+A. (Opsional) Scrape data baru
+cd c:/Users/knrl389/Documents/projects/media-monitoring
+.venv/Scripts/python.exe fetch_news.py --use-groq --hours 24 --output astrazeneca_news.csv
+.venv/Scripts/python.exe bq_load.py astrazeneca_news.json
+
+B. Lihat di localhost
+cd c:/Users/knrl389/Documents/projects/media-monitoring/web
+npm run dev
+Lalu di terminal lain, revalidate cache lokal (ambil REVALIDATE_SECRET dari web/.env.local):
+
+
+curl -X POST http://localhost:3000/api/revalidate -H "Authorization: Bearer <REVALIDATE_SECRET>"
+Buka http://localhost:3000 — cek All News: all-time ≥ 7-days ≥ 24h harus konsisten sekarang.
+
+C. Push ke GitHub → Vercel auto-deploy
+cd c:/Users/knrl389/Documents/projects/media-monitoring
+git add -A
+git commit -m "Fix filter consistency (single-snapshot DAL), add clear filters + analytics range toggle"
+git push origin main
+
+Setelah Vercel selesai build (~2 menit), revalidate production:
+curl -X POST https://az-media-monitoring.vercel.app/api/revalidate -H "Authorization: Bearer <REVALIDATE_SECRET>"
+Tips: selalu jalankan revalidate setelah bq_load.py — itu yang bikin data baru langsung muncul. GitHub Actions harian sudah otomatis melakukannya.

@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { CalendarDays, BarChart3, ArrowRight } from "lucide-react";
 
 import { ArticleCardLandscape } from "@/components/article-card-landscape";
+import { EmailDigestButton } from "@/components/email-digest-button";
 import { TodayKpiCards, KpiCardsSkeleton } from "@/components/kpi-cards";
 import { Skeleton } from "@/components/ui/skeleton";
 import { articleRepo } from "@/lib/repositories";
@@ -15,6 +16,9 @@ export default function LandingPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-4 py-6 sm:space-y-10 sm:px-6 sm:py-10 lg:px-8">
       <HeroSection />
+      <Suspense fallback={null}>
+        <EmailDigestLauncher />
+      </Suspense>
       <Suspense fallback={<KpiCardsSkeleton />}>
         <TodayKpiCards />
       </Suspense>
@@ -67,6 +71,12 @@ function HeroSection() {
       </div>
     </section>
   );
+}
+
+/** Ambil artikel 24h → render tombol compose email digest (client). */
+async function EmailDigestLauncher() {
+  const articles = await articleRepo.findLast24h(100);
+  return <EmailDigestButton articles={articles} />;
 }
 
 async function TodayList() {

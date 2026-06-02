@@ -64,16 +64,22 @@ function normalizeRow(row: Record<string, BQValue>): Article {
 }
 
 /**
- * Fetch SEMUA artikel sekali + anchor `latestScrapedAtMs`. Cached —
+ * Fetch SEMUA artikel sekali + anchor `latestArticleDateMs`. Cached —
  * semua method lain derive dari sini. Invalidasi via revalidateTag("articles").
  *
- * `latestScrapedAtMs` = MAX(scraped_at) — dipakai sebagai anchor untuk window
- * `last-24h` (pengganti `Date.now()`) agar window stabil antar pembukaan
- * page sampai scrape berikutnya jalan + cache-nya di-bust.
+ * `latestArticleDateMs` = MAX(date) → publication date artikel terbaru.
+ * Dipakai sebagai anchor untuk window `last-24h` (pengganti `Date.now()`).
+ *
+ * Kenapa MAX(date) bukan MAX(scraped_at): kolom `scraped_at` ikut berubah
+ * setiap kali translate menulis ulang artikel ke BQ (view `articles_latest`
+ * dedupe by latest scraped_at → versi English ditandai dengan scraped_at
+ * baru). Kalau anchor pakai `scraped_at`, window last-24h ikut bergeser
+ * tiap kali ada translate run — bukan cuma saat scrape. MAX(date) immune
+ * karena `date` = waktu publikasi artikel, tidak diubah oleh translate.
  */
 interface Snapshot {
   articles: Article[];
-  latestScrapedAtMs: number;
+  latestArticleDateMs: number;
 }
 
 const loadSnapshot = unstable_cache(
@@ -88,11 +94,12 @@ const loadSnapshot = unstable_cache(
     `;
     const [rows] = await bq().query({ query: sql });
     const articles = rows.map(normalizeRow);
-    const latestScrapedAtMs = articles.reduce(
-      (max, a) => Math.max(max, new Date(a.scraped_at).getTime()),
-      0,
-    ) || Date.now();
-    return { articles, latestScrapedAtMs };
+    // Snapshot sudah ORDER BY date DESC → articles[0] = artikel terbaru.
+    // Fallback ke Date.now() kalau snapshot kosong (mis. dataset belum di-seed)
+    // supaya page tidak crash.
+    const latestArticleDateMs =
+      articles.length > 0 ? new Date(articles[0].date).getTime() : Date.now();
+    return { articles, latestArticleDateMs };
   },
   ["articles-snapshot"],
   { revalidate: CACHE_TTL_SEC, tags: [CACHE_TAG] },
@@ -128,8 +135,8 @@ function jakartaDateMinusDays(n: number): string {
  *
  * `anchorMs`: titik akhir window untuk `last-24h`. Sengaja DI-INJECT
  * (bukan baca `Date.now()` di sini) supaya semua page yang share snapshot
- * pakai window yang sama = `MAX(scraped_at)` dari snapshot. Hasilnya
- * list stabil antar pembukaan page sampai scrape berikutnya.
+ * pakai window yang sama = `MAX(date)` dari snapshot. Hasilnya list stabil
+ * antar pembukaan page sampai snapshot di-refresh oleh scrape berikutnya.
  */
 function inListRange(
   a: Article,
@@ -220,9 +227,9 @@ export const bigQueryArticleRepository: ArticleRepository = {
   },
 
   async findLast24h(limit = 50) {
-    const { articles, latestScrapedAtMs } = await loadSnapshot();
+    const { articles, latestArticleDateMs } = await loadSnapshot();
     return articles
-      .filter((a) => inListRange(a, "last-24h", latestScrapedAtMs))
+      .filter((a) => inListRange(a, "last-24h", latestArticleDateMs))
       .slice(0, limit);
   },
 
@@ -232,8 +239,8 @@ export const bigQueryArticleRepository: ArticleRepository = {
   },
 
   async findMany(filters) {
-    const { articles, latestScrapedAtMs } = await loadSnapshot();
-    const matched = articles.filter((a) => matchesFilters(a, filters, latestScrapedAtMs));
+    const { articles, latestArticleDateMs } = await loadSnapshot();
+    const matched = articles.filter((a) => matchesFilters(a, filters, latestArticleDateMs));
     const offset = filters.offset ?? 0;
     const limit = filters.limit ?? 50;
     return {
@@ -243,8 +250,8 @@ export const bigQueryArticleRepository: ArticleRepository = {
   },
 
   async dailyKpi(): Promise<DailyKpi> {
-    const { articles, latestScrapedAtMs } = await loadSnapshot();
-    const last24h = articles.filter((a) => inListRange(a, "last-24h", latestScrapedAtMs));
+    const { articles, latestArticleDateMs } = await loadSnapshot();
+    const last24h = articles.filter((a) => inListRange(a, "last-24h", latestArticleDateMs));
     const k24 = computeKpi(last24h);
     return {
       ...computeKpi(articles),
@@ -260,8 +267,8 @@ export const bigQueryArticleRepository: ArticleRepository = {
   },
 
   async filteredKpi(filters) {
-    const { articles, latestScrapedAtMs } = await loadSnapshot();
-    return computeKpi(articles.filter((a) => matchesFilters(a, filters, latestScrapedAtMs)));
+    const { articles, latestArticleDateMs } = await loadSnapshot();
+    return computeKpi(articles.filter((a) => matchesFilters(a, filters, latestArticleDateMs)));
   },
 
   async sentimentTrend(range): Promise<SentimentTrendPoint[]> {

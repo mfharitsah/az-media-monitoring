@@ -22,9 +22,12 @@ Field di-set baru:
   - scraped_at = now()  (supaya view ambil row translated sebagai latest)
 
 Usage:
-    python translate_articles.py                    # translate semua non-en
-    python translate_articles.py --output trans.json
+    # Mode A — translate dari BQ (default):
+    python translate_articles.py                    # translate semua non-en di BQ
     python translate_articles.py --limit 5          # smoke test
+
+    # Mode B — translate dari JSON file (dipakai di GitHub Actions pipeline):
+    python translate_articles.py --input news.json --output news.json
 """
 
 from __future__ import annotations
@@ -215,6 +218,14 @@ def fetch_articles_to_translate(
     return rows
 
 
+def read_all_articles_from_json(path: Path) -> list[dict]:
+    """Baca SEMUA artikel dari JSON apa adanya. Format mengikuti `save_json`
+    di fetch_news.py: `{ generated_at, count, articles: [...] }`.
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data.get("articles", [])
+
+
 # ============================================================================
 # PIPELINE
 # ============================================================================
@@ -295,40 +306,101 @@ def main() -> int:
 
     p = argparse.ArgumentParser(description="Translate AZ news articles id → en")
     p.add_argument("--output", default="translated_articles.json")
+    p.add_argument("--input", default=None,
+                   help="JSON input path (output fetch_news.py). Kalau di-set, "
+                        "skip BQ query → translate dari file. Output ikut "
+                        "menyertakan artikel English (passthrough).")
     p.add_argument("--project", default=os.getenv("GCP_PROJECT_ID"))
     p.add_argument("--dataset", default=os.getenv("BQ_DATASET", DEFAULT_DATASET))
     p.add_argument("--location", default=os.getenv("BQ_LOCATION", DEFAULT_LOCATION))
     p.add_argument("--limit", type=int, default=None, help="Limit rows (smoke test)")
     args = p.parse_args()
 
-    if not args.project:
-        print("[!] GCP_PROJECT_ID belum di-set", file=sys.stderr)
-        return 1
-
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         print("[!] GROQ_API_KEY belum di-set", file=sys.stderr)
         return 1
 
-    print(f"[*] Fetching non-en articles from {args.project}.{args.dataset}.articles_latest",
-          file=sys.stderr)
-    rows = fetch_articles_to_translate(args.project, args.dataset, args.location, args.limit)
-    print(f"[*] Got {len(rows)} articles to translate", file=sys.stderr)
+    # --- Input source ---
+    # `all_originals` cuma diisi di mode --input (untuk fallback kalau translate
+    # gagal di sebagian artikel — kita keep originalnya supaya tidak ada data
+    # yang hilang antar fetch dan bq_load).
+    all_originals: list[dict] = []
+    if args.input:
+        input_path = Path(args.input)
+        if not input_path.exists():
+            print(f"[!] Input file tidak ada: {input_path}", file=sys.stderr)
+            return 1
+        print(f"[*] Reading articles from {input_path}", file=sys.stderr)
+        all_originals = read_all_articles_from_json(input_path)
+        rows = [
+            {
+                "id": a.get("id", ""),
+                "headline": a.get("headline", ""),
+                "url": a.get("url", ""),
+                "date": a.get("date"),
+                "source": a.get("source", "") or "",
+                "summary": a.get("summary", "") or "",
+                "category": a.get("category", "") or "",
+                "subcategory": a.get("subcategory", "") or "",
+                "sentiment": a.get("sentiment", "") or "",
+                "keywords": a.get("keywords", "") or "",
+                "city": a.get("city", "") or "",
+                "province": a.get("province", "") or "",
+            }
+            for a in all_originals
+            if (a.get("language") or "id") != "en"
+        ]
+        if args.limit:
+            rows = rows[: args.limit]
+        n_en = len(all_originals) - len(rows)
+        print(f"[*] {len(rows)} to translate, {n_en} already English",
+              file=sys.stderr)
+    else:
+        if not args.project:
+            print("[!] GCP_PROJECT_ID belum di-set", file=sys.stderr)
+            return 1
+        print(f"[*] Fetching non-en articles from {args.project}.{args.dataset}.articles_latest",
+              file=sys.stderr)
+        rows = fetch_articles_to_translate(
+            args.project, args.dataset, args.location, args.limit,
+        )
+        print(f"[*] Got {len(rows)} articles to translate", file=sys.stderr)
 
-    if not rows:
+    # --- Empty cases ---
+    if not rows and not all_originals:
         print("[+] Nothing to translate.", file=sys.stderr)
+        if args.input:
+            save_json([], Path(args.output))  # tulis kosong supaya downstream tidak break
         return 0
 
-    translator = GroqTranslator(api_key)
-    print(f"[*] Using Groq model: {translator.model}", file=sys.stderr)
+    # --- Translate ---
+    translated: list[dict] = []
+    if rows:
+        translator = GroqTranslator(api_key)
+        print(f"[*] Using Groq model: {translator.model}", file=sys.stderr)
+        translated = translate_all(rows, translator)
 
-    translated = translate_all(rows, translator)
-    if not translated:
-        print("[!] No successful translations", file=sys.stderr)
-        return 1
+    # --- Build output ---
+    if args.input:
+        # Output: SEMUA artikel original, dengan field bahasa di-swap untuk yang
+        # berhasil di-translate. Yang gagal di-translate tetap masuk (Indonesian).
+        translated_by_id = {t["id"]: t for t in translated}
+        combined = [translated_by_id.get(a.get("id", ""), a) for a in all_originals]
+        n_fail = len(rows) - len(translated)
+        print(f"[OK] Done. {len(translated)} translated, "
+              f"{len(all_originals) - len(rows)} passthrough EN, "
+              f"{n_fail} failed (kept original). "
+              f"Next: python bq_load.py {args.output}", file=sys.stderr)
+    else:
+        if not translated:
+            print("[!] No successful translations", file=sys.stderr)
+            return 1
+        combined = translated
+        print(f"[OK] Done. {len(translated)} translated. "
+              f"Next: python bq_load.py {args.output}", file=sys.stderr)
 
-    save_json(translated, Path(args.output))
-    print(f"[OK] Done. Next: python bq_load.py {args.output}", file=sys.stderr)
+    save_json(combined, Path(args.output))
     return 0
 
 

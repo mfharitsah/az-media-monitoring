@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { CalendarDays, BarChart3, ArrowRight } from "lucide-react";
 
 import { ArticleCardLandscape } from "@/components/article-card-landscape";
-import { EmailDigestButton } from "@/components/email-digest-button";
+import { EmailDigestLauncher } from "@/components/email-digest-launcher";
 import { TodayKpiCards, KpiCardsSkeleton } from "@/components/kpi-cards";
 import { Skeleton } from "@/components/ui/skeleton";
 import { articleRepo } from "@/lib/repositories";
@@ -71,12 +71,6 @@ function HeroSection() {
       </div>
     </section>
   );
-}
-
-/** Ambil artikel 24h → render tombol compose email digest (client). */
-async function EmailDigestLauncher() {
-  const articles = await articleRepo.findLast24h(100);
-  return <EmailDigestButton articles={articles} />;
 }
 
 async function TodayList() {

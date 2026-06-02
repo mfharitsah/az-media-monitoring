@@ -64,11 +64,20 @@ function normalizeRow(row: Record<string, BQValue>): Article {
 }
 
 /**
- * Fetch SEMUA artikel sekali, sorted by date desc. Cached — semua method
- * lain derive dari sini. Invalidasi via revalidateTag("articles").
+ * Fetch SEMUA artikel sekali + anchor `latestScrapedAtMs`. Cached —
+ * semua method lain derive dari sini. Invalidasi via revalidateTag("articles").
+ *
+ * `latestScrapedAtMs` = MAX(scraped_at) — dipakai sebagai anchor untuk window
+ * `last-24h` (pengganti `Date.now()`) agar window stabil antar pembukaan
+ * page sampai scrape berikutnya jalan + cache-nya di-bust.
  */
+interface Snapshot {
+  articles: Article[];
+  latestScrapedAtMs: number;
+}
+
 const loadSnapshot = unstable_cache(
-  async (): Promise<Article[]> => {
+  async (): Promise<Snapshot> => {
     const sql = `
       SELECT
         id, headline, url, date, source, summary,
@@ -78,7 +87,12 @@ const loadSnapshot = unstable_cache(
       ORDER BY date DESC
     `;
     const [rows] = await bq().query({ query: sql });
-    return rows.map(normalizeRow);
+    const articles = rows.map(normalizeRow);
+    const latestScrapedAtMs = articles.reduce(
+      (max, a) => Math.max(max, new Date(a.scraped_at).getTime()),
+      0,
+    ) || Date.now();
+    return { articles, latestScrapedAtMs };
   },
   ["articles-snapshot"],
   { revalidate: CACHE_TTL_SEC, tags: [CACHE_TAG] },
@@ -109,13 +123,25 @@ function jakartaDateMinusDays(n: number): string {
 // In-memory filters & aggregations (pure functions atas snapshot)
 // =============================================================================
 
-/** Cek apakah artikel masuk rentang tanggal (list filter). */
-function inListRange(a: Article, range: DateRange, customDate?: string): boolean {
+/**
+ * Cek apakah artikel masuk rentang tanggal (list filter).
+ *
+ * `anchorMs`: titik akhir window untuk `last-24h`. Sengaja DI-INJECT
+ * (bukan baca `Date.now()` di sini) supaya semua page yang share snapshot
+ * pakai window yang sama = `MAX(scraped_at)` dari snapshot. Hasilnya
+ * list stabil antar pembukaan page sampai scrape berikutnya.
+ */
+function inListRange(
+  a: Article,
+  range: DateRange,
+  anchorMs: number,
+  customDate?: string,
+): boolean {
   switch (range) {
     case "all-time":
       return true;
     case "last-24h":
-      return new Date(a.date).getTime() >= Date.now() - 24 * 3600 * 1000;
+      return new Date(a.date).getTime() >= anchorMs - 24 * 3600 * 1000;
     case "last-7-days":
       return jakartaDate(a.date) >= jakartaDateMinusDays(6);
     case "custom":
@@ -129,8 +155,12 @@ function inAnalyticsRange(a: Article, range: AnalyticsRange): boolean {
   return jakartaDate(a.date) >= jakartaDateMinusDays(6);
 }
 
-function matchesFilters(a: Article, f: ArticleListFilters): boolean {
-  if (!inListRange(a, f.range, f.customDate)) return false;
+function matchesFilters(
+  a: Article,
+  f: ArticleListFilters,
+  anchorMs: number,
+): boolean {
+  if (!inListRange(a, f.range, anchorMs, f.customDate)) return false;
 
   if (f.q) {
     const q = f.q.toLowerCase();
@@ -185,25 +215,25 @@ function computeKpi(articles: Article[]): AllTimeKpi {
 
 export const bigQueryArticleRepository: ArticleRepository = {
   async findById(id) {
-    const all = await loadSnapshot();
-    return all.find((a) => a.id === id) ?? null;
+    const { articles } = await loadSnapshot();
+    return articles.find((a) => a.id === id) ?? null;
   },
 
   async findLast24h(limit = 50) {
-    const all = await loadSnapshot();
-    return all
-      .filter((a) => inListRange(a, "last-24h"))
+    const { articles, latestScrapedAtMs } = await loadSnapshot();
+    return articles
+      .filter((a) => inListRange(a, "last-24h", latestScrapedAtMs))
       .slice(0, limit);
   },
 
   async findRecent(limit = 10) {
-    const all = await loadSnapshot();
-    return all.slice(0, limit); // snapshot sudah sorted date desc
+    const { articles } = await loadSnapshot();
+    return articles.slice(0, limit); // snapshot sudah sorted date desc
   },
 
   async findMany(filters) {
-    const all = await loadSnapshot();
-    const matched = all.filter((a) => matchesFilters(a, filters));
+    const { articles, latestScrapedAtMs } = await loadSnapshot();
+    const matched = articles.filter((a) => matchesFilters(a, filters, latestScrapedAtMs));
     const offset = filters.offset ?? 0;
     const limit = filters.limit ?? 50;
     return {
@@ -213,11 +243,11 @@ export const bigQueryArticleRepository: ArticleRepository = {
   },
 
   async dailyKpi(): Promise<DailyKpi> {
-    const all = await loadSnapshot();
-    const last24h = all.filter((a) => inListRange(a, "last-24h"));
+    const { articles, latestScrapedAtMs } = await loadSnapshot();
+    const last24h = articles.filter((a) => inListRange(a, "last-24h", latestScrapedAtMs));
     const k24 = computeKpi(last24h);
     return {
-      ...computeKpi(all),
+      ...computeKpi(articles),
       totalLast24h: k24.total,
       netSentimentLast24h: k24.netSentiment,
       azRelatedLast24h: k24.azRelatedTotal,
@@ -225,18 +255,19 @@ export const bigQueryArticleRepository: ArticleRepository = {
   },
 
   async allTimeKpi() {
-    return computeKpi(await loadSnapshot());
+    const { articles } = await loadSnapshot();
+    return computeKpi(articles);
   },
 
   async filteredKpi(filters) {
-    const all = await loadSnapshot();
-    return computeKpi(all.filter((a) => matchesFilters(a, filters)));
+    const { articles, latestScrapedAtMs } = await loadSnapshot();
+    return computeKpi(articles.filter((a) => matchesFilters(a, filters, latestScrapedAtMs)));
   },
 
   async sentimentTrend(range): Promise<SentimentTrendPoint[]> {
-    const all = await loadSnapshot();
+    const { articles } = await loadSnapshot();
     const byDate = new Map<string, SentimentTrendPoint>();
-    for (const a of all) {
+    for (const a of articles) {
       if (!inAnalyticsRange(a, range)) continue;
       const d = jakartaDate(a.date);
       let pt = byDate.get(d);
@@ -252,9 +283,9 @@ export const bigQueryArticleRepository: ArticleRepository = {
   },
 
   async subcategoryBreakdown(range): Promise<SubcategoryBreakdown[]> {
-    const all = await loadSnapshot();
+    const { articles } = await loadSnapshot();
     const counts = new Map<string, number>();
-    for (const a of all) {
+    for (const a of articles) {
       if (!inAnalyticsRange(a, range)) continue;
       if (!a.subcategory) continue;
       counts.set(a.subcategory, (counts.get(a.subcategory) ?? 0) + 1);
@@ -268,9 +299,9 @@ export const bigQueryArticleRepository: ArticleRepository = {
   },
 
   async topSources(range, limit): Promise<TopSource[]> {
-    const all = await loadSnapshot();
+    const { articles } = await loadSnapshot();
     const counts = new Map<string, number>();
-    for (const a of all) {
+    for (const a of articles) {
       if (!inAnalyticsRange(a, range)) continue;
       if (!a.source) continue;
       counts.set(a.source, (counts.get(a.source) ?? 0) + 1);
@@ -282,9 +313,9 @@ export const bigQueryArticleRepository: ArticleRepository = {
   },
 
   async topProvinces(range, limit): Promise<TopProvince[]> {
-    const all = await loadSnapshot();
+    const { articles } = await loadSnapshot();
     const counts = new Map<string, number>();
-    for (const a of all) {
+    for (const a of articles) {
       if (!inAnalyticsRange(a, range)) continue;
       if (!a.province) continue;
       counts.set(a.province, (counts.get(a.province) ?? 0) + 1);

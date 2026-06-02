@@ -3,16 +3,28 @@ import type { Article, ArticleCategory } from "@/lib/types";
 /**
  * Builder email digest harian. Menghasilkan DUA bentuk:
  *
- * 1. `body`  — plain text. Dipakai untuk `mailto:` (Outlook membuka compose
- *    dengan body ini). mailto TIDAK mendukung HTML.
- * 2. `html`  — rich HTML dengan tabel per artikel (mirip format lampiran).
+ * 1. `body`  — plain text full digest. Tetap di-return untuk clipboard
+ *    `text/plain` fallback (browser tanpa `ClipboardItem`).
+ * 2. `html`  — rich HTML dengan tabel per artikel.
  *    Dipakai untuk disalin ke clipboard; user paste (Ctrl+V) ke body Outlook
  *    yang rich-text → tabel ter-render.
+ *
+ * mailtoUrl body = INSTRUKSI singkat (bukan full digest) karena bakal langsung
+ * di-overwrite oleh paste user. mailto cuma support plain text.
  */
 
 /** Penerima tetap — kelola di sini kalau perlu ganti. */
 export const RECIPIENT_TO = "kania.aidillafirka@astrazeneca.com";
 export const RECIPIENT_CC = "muhammad.cavannaufalazizi@astrazeneca.com";
+
+/**
+ * Body singkat yang muncul di Outlook compose — instruksi paste.
+ * SENGAJA English: email akan dikirim ke CLT (Country Leadership Team).
+ * Kalau user lupa Ctrl+V, isi default ini tetap masuk akal untuk recipient.
+ */
+const PASTE_HINT_BODY =
+  "[ Paste the email digest here — press Ctrl+A then Ctrl+V to replace " +
+  "this text with the formatted table copied to your clipboard ]";
 
 const JKT = "Asia/Jakarta";
 
@@ -183,7 +195,7 @@ export function buildEmailTemplate(
     `mailto:${RECIPIENT_TO}` +
     `?cc=${RECIPIENT_CC}` +
     `&subject=${encodeURIComponent(subject)}` +
-    `&body=${encodeURIComponent(body)}`;
+    `&body=${encodeURIComponent(PASTE_HINT_BODY)}`;
 
   return { to: RECIPIENT_TO, cc: RECIPIENT_CC, subject, body, html, mailtoUrl };
 }

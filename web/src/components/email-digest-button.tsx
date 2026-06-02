@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Mail, X, Copy, Check, ExternalLink } from "lucide-react";
+import { Mail, X, Send } from "lucide-react";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   buildEmailTemplate,
@@ -17,20 +17,19 @@ const STORAGE_KEY = "az-digest-sender";
 const EMPTY_SENDER: SenderInfo = { name: "", jobTitle: "", email: "" };
 
 /**
- * Tombol home page untuk menyusun email digest harian.
+ * Tombol untuk menyusun email digest harian.
  *
  * Alur:
  * 1. Klik tombol → modal konfirmasi (template + input nama/jabatan/email).
- * 2. "Copy formatted" → menyalin HTML bertabel ke clipboard.
- * 3. "Open in Outlook" → `mailto:` membuka Outlook (To/Cc/Subject + body teks).
- * 4. Di body Outlook: Ctrl+A lalu Ctrl+V → versi tabel menggantikan teks polos.
+ * 2. "Paste to Outlook" → satu klik: copy formatted ke clipboard +
+ *    buka Outlook via mailto. Body mailto cuma instruksi singkat.
+ * 3. Di body Outlook: Ctrl+A lalu Ctrl+V → tabel HTML menggantikan instruksi.
  *
  * mailto hanya mendukung teks polos → tabel HTML harus lewat clipboard.
  */
 export function EmailDigestButton({ articles }: { articles: Article[] }) {
   const [open, setOpen] = useState(false);
   const [sender, setSender] = useState<SenderInfo>(EMPTY_SENDER);
-  const [copied, setCopied] = useState(false);
 
   // Restore info pengirim yang tersimpan.
   useEffect(() => {
@@ -64,8 +63,12 @@ export function EmailDigestButton({ articles }: { articles: Article[] }) {
 
   const template = buildEmailTemplate(articles, sender);
 
-  /** Salin versi HTML bertabel (+ plain text fallback) ke clipboard. */
-  const copyFormatted = async () => {
+  /**
+   * Satu klik: copy formatted HTML+text ke clipboard, lalu buka Outlook.
+   * Clipboard gagal? Tetap buka Outlook — user bisa retry; tidak menutup
+   * kemungkinan paste.
+   */
+  const pasteToOutlook = async () => {
     try {
       if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
         await navigator.clipboard.write([
@@ -78,11 +81,11 @@ export function EmailDigestButton({ articles }: { articles: Article[] }) {
         // Browser lama — fallback teks polos.
         await navigator.clipboard.writeText(template.body);
       }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
     } catch {
-      /* clipboard ditolak — abaikan */
+      /* clipboard ditolak — biarkan; mailto tetap dibuka */
     }
+    window.location.href = template.mailtoUrl;
+    setOpen(false);
   };
 
   return (
@@ -128,19 +131,14 @@ export function EmailDigestButton({ articles }: { articles: Article[] }) {
               <ol className="space-y-1 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
                 <li>
                   <strong className="text-foreground">1.</strong> Klik{" "}
-                  <strong className="text-foreground">Copy formatted</strong> — versi
-                  tabel disalin ke clipboard.
+                  <strong className="text-foreground">Paste to Outlook</strong> —
+                  clipboard terisi versi tabel + Outlook terbuka otomatis.
                 </li>
                 <li>
-                  <strong className="text-foreground">2.</strong> Klik{" "}
-                  <strong className="text-foreground">Open in Outlook</strong> —
-                  To/Cc/Subject terisi otomatis.
-                </li>
-                <li>
-                  <strong className="text-foreground">3.</strong> Di body email Outlook:
+                  <strong className="text-foreground">2.</strong> Di body email Outlook:
                   tekan <strong className="text-foreground">Ctrl+A</strong> lalu{" "}
                   <strong className="text-foreground">Ctrl+V</strong> — tabel
-                  menggantikan teks polos.
+                  menggantikan teks instruksi.
                 </li>
               </ol>
 
@@ -199,25 +197,10 @@ export function EmailDigestButton({ articles }: { articles: Article[] }) {
                 <Button variant="outline" onClick={() => setOpen(false)}>
                   Cancel
                 </Button>
-                <Button variant="secondary" onClick={copyFormatted} className="gap-2">
-                  {copied ? (
-                    <>
-                      <Check className="h-4 w-4" /> Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-4 w-4" /> Copy formatted
-                    </>
-                  )}
+                <Button onClick={pasteToOutlook} className="gap-2">
+                  <Send className="h-4 w-4" />
+                  Paste to Outlook
                 </Button>
-                <a
-                  href={template.mailtoUrl}
-                  onClick={() => setOpen(false)}
-                  className={buttonVariants({ className: "gap-2" })}
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  Open in Outlook
-                </a>
               </div>
             </div>
           </div>

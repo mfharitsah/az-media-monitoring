@@ -3,6 +3,7 @@ import { Suspense } from "react";
 
 import { ArticleCardLandscape } from "@/components/article-card-landscape";
 import { ArticleCardGallery } from "@/components/article-card-gallery";
+import { EmailDigestLauncher } from "@/components/email-digest-launcher";
 import { FilteredKpiCards, KpiCardsSkeleton } from "@/components/kpi-cards";
 import { NewsFilters, RangeTabs } from "@/components/news-filters";
 import { Pagination } from "@/components/pagination";
@@ -70,6 +71,12 @@ export default async function NewsPage({
         <RangeTabs activeRange={activeRangeTab} />
         <NewsFilters />
       </div>
+
+      {filters.range === "last-24h" && !sp.date && (
+        <Suspense fallback={null}>
+          <EmailDigestLauncher />
+        </Suspense>
+      )}
 
       <Suspense
         key={`list-${JSON.stringify(filters)}-p${page}`}

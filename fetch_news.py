@@ -218,9 +218,28 @@ REGULATORY_KEYWORDS = [
 
 # Schema enforced via Groq Structured Outputs (JSON Schema mode).
 # Struktur dijamin sama dengan Pydantic model di bawah — prompt hanya jelaskan SEMANTIK.
-SYSTEM_PROMPT = """Anda adalah analis media untuk AstraZeneca Indonesia. Analisis artikel berita yang diberikan.
+PRESERVE_TERMS = (
+    "AstraZeneca, Vaxzevria, Imfinzi, Tagrisso, Forxiga, Soliris, "
+    "BPOM, Kemenkes, Kementerian Kesehatan, Menkes, BPJS, JKN, "
+    "Formularium Nasional, Fornas, INA-CBGs, TKDN, LKPP, MUI, "
+    "Komisi IX, DPR, Permenkes, UU Kesehatan, RUU Kesehatan, "
+    "AZ Forest, Young Health Programme"
+)
 
-Klasifikasikan ke salah satu Subcategory berikut (urutan prioritas dari atas):
+SYSTEM_PROMPT = f"""Anda adalah analis media untuk AstraZeneca Indonesia. Tugas: analisis artikel + hasilkan output BAHASA INDONESIA dan ENGLISH sekaligus.
+
+Output schema punya field SEPARATE untuk Indonesian (`summary_id`, `keywords_id`) dan English (`headline_en`, `summary_en`, `keywords_en`). Hasilkan SEMUA — content identik secara fakta, hanya bahasa yang beda.
+
+=== PRESERVE EXACTLY di output English (jangan diterjemahkan) ===
+{PRESERVE_TERMS}
+
+Aturan translation:
+- `headline_en`: terjemahan headline yang diberikan user. Bahasa Inggris jurnalistik natural, mirip panjang aslinya.
+- `summary_en`: terjemahan dari `summary_id`. Fakta identik, bahasa English natural.
+- `keywords_en`: terjemahan dari `keywords_id`. Comma-separated, max 5.
+- `city` dan `province`: TIDAK diterjemahkan (nama tempat Indonesia).
+
+=== Klasifikasi Subcategory (urutan prioritas dari atas) ===
 
 === Category: About AstraZeneca ===
 
@@ -274,11 +293,13 @@ Contoh GOOD: summary "BPOM tarik 11 kosmetik yang mengandung merkuri dan hidroku
 di Jakarta dan Surabaya. Produk dikeluarkan tanpa izin edar resmi sejak 2024. Konsumen diminta
 laporkan via aplikasi BPOM Mobile."  ✓ tambah merk bahan, lokasi, periode, channel respons.
 
-Kalau body terlalu singkat / cuma paragraf pertama copy headline → return summary kosong (string "").
+Kalau body terlalu singkat / cuma paragraf pertama copy headline → return summary kosong (string "")
+DI KEDUA FIELD (`summary_id` dan `summary_en`).
 JANGAN paksa bikin summary fake — Pydantic schema mengizinkan empty string.
 
-Panjang: 2-3 kalimat Bahasa Indonesia, maksimal 300 karakter.
-Keywords: 5 kata kunci penting (entitas/topik specific), dipisah koma.
+Panjang summary: 2-3 kalimat, maksimal 300 karakter (berlaku untuk Indonesian dan English).
+Keywords: 5 kata kunci penting (entitas/topik specific), dipisah koma. Hasilkan di kedua field
+(`keywords_id` Indonesian, `keywords_en` English).
 
 Aturan city + province:
 - Ekstrak kota & provinsi Indonesia yang menjadi FOKUS berita (lokasi event, kantor, pasien, pejabat berbicara, dll.).
@@ -328,18 +349,43 @@ class ArticleAnalysis(BaseModel):
     2. Validate + parse response → typed Python object
 
     Kalau struktur berubah, cukup edit class ini — prompt & validasi sinkron otomatis.
+
+    DUAL-LANGUAGE: LM produce SEPARATE Indonesian + English fields untuk headline,
+    summary, dan keywords. Disimpan ke kolom BQ terpisah (mis. `headline` = en,
+    `headline_id` = id) supaya UI bisa toggle bahasa tanpa Groq call on-demand.
     """
     # `extra='forbid'` menambahkan `additionalProperties: false` ke JSON Schema —
     # Groq strict mode butuh ini di setiap object.
     model_config = ConfigDict(extra="forbid")
 
-    summary: str = Field(
-        description="Ringkasan 2-3 kalimat Bahasa Indonesia, max 300 karakter",
-        max_length=600,  # buffer di atas target prompt — strict validator reject kalau exceed
+    # --- Headline (translate dari RSS Indonesian) ---
+    headline_en: str = Field(
+        description="English headline translation. Preserve proper nouns and "
+                    "Indonesian acronyms (BPOM, Kemenkes, AstraZeneca, BPJS, JKN, "
+                    "Permenkes, Komisi IX, DPR, dll). Length similar to original.",
+        max_length=400,
     )
+    # --- Summary (LM generate dari body) ---
+    summary_id: str = Field(
+        description="Ringkasan 2-3 kalimat Bahasa Indonesia, max 300 karakter",
+        max_length=600,
+    )
+    summary_en: str = Field(
+        description="English summary, 2-3 sentences, max 300 chars. "
+                    "Translate `summary_id` keeping facts identical. "
+                    "Preserve proper nouns and Indonesian acronyms.",
+        max_length=600,
+    )
+    # --- Classification ---
     subcategory: Subcategory = Field(description="Klasifikasi spesifik artikel (lihat aturan di prompt)")
     sentiment: Sentiment = Field(description="Sentimen dari sudut pandang AstraZeneca")
-    keywords: str = Field(description="5 keyword dipisah koma")
+    # --- Keywords (Indonesian + English) ---
+    keywords_id: str = Field(description="5 keyword Bahasa Indonesia dipisah koma")
+    keywords_en: str = Field(
+        description="5 English keywords, comma-separated. Translate keywords_id; "
+                    "preserve proper nouns and acronyms.",
+    )
+    # --- Location (proper nouns Indonesian — no translation) ---
     city: str = Field(
         description="Kota di Indonesia yang menjadi fokus berita (mis. 'Jakarta', 'Surabaya'). "
                     "String kosong '' kalau tidak ada kota spesifik disebut.",
@@ -611,7 +657,10 @@ class GroqClient:
             ],
             "response_format": _build_response_format(),  # Structured Outputs (strict JSON Schema)
             "temperature": 0.3,  # rendah untuk konsistensi
-            "max_tokens": 800,   # cukup untuk summary + keywords; truncation = json_validate_failed
+            # Dual-language output (ID + EN headline/summary/keywords) butuh budget
+            # lebih besar dari single-language schema. 1500 cukup untuk 2× summary
+            # 300 char + 2× keywords + headline_en + classifier fields.
+            "max_tokens": 1500,
         }
 
         response_text = self._post_with_retry(payload)
@@ -628,8 +677,13 @@ class GroqClient:
             print(f"    ! JSON parse failed: {e}", file=sys.stderr)
             return None
 
-    def _post_with_retry(self, payload: dict, max_retries: int = 1) -> str | None:
-        """POST ke Groq dengan retry singkat untuk 429 (rate limit). Return raw content string."""
+    def _post_with_retry(self, payload: dict, max_retries: int = 5) -> str | None:
+        """POST ke Groq dengan retry untuk 429 (rate limit). Return raw content string.
+
+        Smart retry: parse pesan error Groq yang ngasih tahu waktu retry tepat
+        ("Please try again in 2.9175s"). Lebih reliable daripada fixed sleep.
+        Fallback ke exponential backoff kalau parsing gagal.
+        """
         attempt = 0
         while True:
             try:
@@ -641,19 +695,34 @@ class GroqClient:
                 return None
             except requests.HTTPError as e:
                 status = e.response.status_code
+                err_body = e.response.text if e.response is not None else ""
                 if status == 429 and attempt < max_retries:
                     attempt += 1
-                    print(f"    ! Rate limit, wait 5s & retry ({attempt}/{max_retries})...",
+                    wait = _parse_retry_after(err_body, fallback=min(60, 5 * 2 ** attempt))
+                    print(f"    ! 429 TPM hit, wait {wait:.1f}s & retry ({attempt}/{max_retries})...",
                           file=sys.stderr)
-                    time.sleep(5)
+                    time.sleep(wait)
                     continue
-                # Tampilkan body error untuk debugging schema/model issues
-                body_preview = e.response.text[:2000] if e.response is not None else ""
-                print(f"    ! Groq HTTP {status}: {body_preview}", file=sys.stderr)
+                print(f"    ! Groq HTTP {status}: {err_body[:500]}", file=sys.stderr)
                 return None
             except Exception as e:
                 print(f"    ! Groq call failed: {e}", file=sys.stderr)
                 return None
+
+
+_RETRY_AFTER_RE = re.compile(r"try again in ([0-9]+(?:\.[0-9]+)?)(ms|s)")
+
+
+def _parse_retry_after(err_body: str, fallback: float) -> float:
+    """Parse 'Please try again in 2.9175s' atau '352.5ms' dari pesan error Groq.
+    Return waktu tunggu dalam detik, plus 0.5s buffer untuk safety."""
+    m = _RETRY_AFTER_RE.search(err_body)
+    if not m:
+        return fallback
+    val = float(m.group(1))
+    if m.group(2) == "ms":
+        val = val / 1000
+    return val + 0.5
 
 
 # ============================================================================
@@ -702,15 +771,16 @@ def process_article(entry, fetch_body: bool, groq: GroqClient | None) -> dict | 
         return None
 
     analysis_text = (headline + " " + description_clean + " " + body).strip()
-    language = detect_language(analysis_text)
     now_iso = datetime.now(timezone.utc).isoformat()
+    # Konvensi dual-language: kolom utama (headline, summary, keywords) = English,
+    # kolom *_id = Indonesian original. `language` selalu "en" pasca refactor
+    # (kolom di-keep untuk backward compat tapi semantik berubah).
     base = {
         "id": make_article_id(url),
-        "headline": headline,
         "url": url,
         "date": pub_dt.isoformat(),
         "source": source,
-        "language": language,
+        "language": "en",
         "scraped_at": now_iso,
     }
 
@@ -730,27 +800,40 @@ def process_article(entry, fetch_body: bool, groq: GroqClient | None) -> dict | 
                   f"{' @ ' + ai.city if ai.city else ''}", file=sys.stderr)
             return {
                 **base,
-                "summary": ai.summary,
-                "category": category,
-                "subcategory": ai.subcategory,
-                "sentiment": ai.sentiment,
-                "keywords": ai.keywords,
-                "city": ai.city,
-                "province": ai.province,
+                "headline":     ai.headline_en,   # English (primary display)
+                "headline_id":  headline,         # Indonesian original from RSS
+                "summary":      ai.summary_en,    # English
+                "summary_id":   ai.summary_id,    # Indonesian
+                "category":     category,
+                "subcategory":  ai.subcategory,
+                "sentiment":    ai.sentiment,
+                "keywords":     ai.keywords_en,   # English
+                "keywords_id":  ai.keywords_id,   # Indonesian
+                "city":         ai.city,
+                "province":     ai.province,
             }
-        print(f"    ! fallback to rule-based (no city/province)", file=sys.stderr)
+        print(f"    ! fallback to rule-based (Indonesian-only)", file=sys.stderr)
 
-    # Rule-based fallback — best-effort, hanya kalau Groq gagal
+    # Rule-based fallback — best-effort, hanya kalau Groq gagal.
+    # Tidak ada terjemahan English di fallback path → English fields kosong.
+    # Acceptable: fallback jarang trigger; data tetap usable lewat *_id fields.
     fallback_subcategory = detect_subcategory(analysis_text)
+    fallback_summary = make_summary(body or description_clean or headline)
+    fallback_keywords = extract_keywords(analysis_text)
     return {
         **base,
-        "summary": make_summary(body or description_clean or headline),
-        "category": SUBCATEGORY_TO_CATEGORY[fallback_subcategory],
-        "subcategory": fallback_subcategory,
-        "sentiment": simple_sentiment(analysis_text),
-        "keywords": extract_keywords(analysis_text),
-        "city": "",       # rule-based fallback tidak ekstrak lokasi
-        "province": "",
+        "language":     "id",  # tidak ada translasi di fallback path
+        "headline":     headline,        # Indonesian (no EN available)
+        "headline_id":  headline,
+        "summary":      fallback_summary,
+        "summary_id":   fallback_summary,
+        "category":     SUBCATEGORY_TO_CATEGORY[fallback_subcategory],
+        "subcategory":  fallback_subcategory,
+        "sentiment":    simple_sentiment(analysis_text),
+        "keywords":     fallback_keywords,
+        "keywords_id":  fallback_keywords,
+        "city":         "",
+        "province":     "",
     }
 
 
@@ -785,9 +868,15 @@ def fetch_news(keywords: list[str], hours: int, fetch_body: bool,
 
 
 # Urutan kolom = urutan kontrak data untuk web/database. JANGAN ubah tanpa migrasi.
+# Catatan dual-language: kolom utama (headline/summary/keywords) = English;
+# kolom *_id = Indonesian original.
 OUTPUT_COLUMNS = [
-    "id", "headline", "url", "date", "source",
-    "summary", "category", "subcategory", "sentiment", "keywords",
+    "id",
+    "headline", "headline_id",
+    "url", "date", "source",
+    "summary", "summary_id",
+    "category", "subcategory", "sentiment",
+    "keywords", "keywords_id",
     "city", "province",
     "language", "scraped_at",
 ]

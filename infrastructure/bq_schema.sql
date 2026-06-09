@@ -16,20 +16,23 @@
 -- TABLE: articles (append-only raw inserts)
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS `az_daily_news_collection.articles` (
-  id           STRING    NOT NULL  OPTIONS(description="12-char stable hash dari URL"),
-  headline     STRING    NOT NULL,
-  url          STRING    NOT NULL  OPTIONS(description="URL artikel asli (sudah di-decode dari Google News redirect)"),
-  date         TIMESTAMP NOT NULL  OPTIONS(description="published_at dari RSS feed"),
-  source       STRING                OPTIONS(description="Nama publikasi, mis. 'Kompas.com'"),
-  summary      STRING                OPTIONS(description="Ringkasan 2-3 kalimat dari LM, Bahasa Indonesia"),
-  category     STRING                OPTIONS(description="enum: 'About AstraZeneca' | 'Regulatory/Policy'"),
-  subcategory  STRING                OPTIONS(description="enum: 'AZ Focus' | 'AZ Mentioned' | 'Stakeholder & Regulator' | 'Pharma Policy' | 'General Health Regulation'"),
-  sentiment    STRING                OPTIONS(description="enum: 'Positive' | 'Neutral' | 'Negative'"),
-  keywords     STRING                OPTIONS(description="5 kata kunci dipisah koma"),
-  city         STRING                OPTIONS(description="Kota Indonesia atau '' kalau tidak disebut"),
-  province     STRING                OPTIONS(description="Provinsi Indonesia (nama resmi) atau ''"),
-  language     STRING                OPTIONS(description="ISO 639-1: 'id' atau 'en'"),
-  scraped_at   TIMESTAMP NOT NULL  OPTIONS(description="Waktu loader memasukkan row ini")
+  id            STRING    NOT NULL  OPTIONS(description="12-char stable hash dari URL"),
+  headline      STRING    NOT NULL  OPTIONS(description="Headline ENGLISH (default UI display)"),
+  headline_id   STRING                OPTIONS(description="Headline original Bahasa Indonesia (dari RSS feed)"),
+  url           STRING    NOT NULL  OPTIONS(description="URL artikel asli (sudah di-decode dari Google News redirect)"),
+  date          TIMESTAMP NOT NULL  OPTIONS(description="published_at dari RSS feed"),
+  source        STRING                OPTIONS(description="Nama publikasi, mis. 'Kompas.com'"),
+  summary       STRING                OPTIONS(description="Ringkasan English (default UI display)"),
+  summary_id    STRING                OPTIONS(description="Ringkasan Bahasa Indonesia"),
+  category      STRING                OPTIONS(description="enum: 'About AstraZeneca' | 'Regulatory/Policy'"),
+  subcategory   STRING                OPTIONS(description="enum: 'AZ Focus' | 'AZ Mentioned' | 'Stakeholder & Regulator' | 'Pharma Policy' | 'General Health Regulation'"),
+  sentiment     STRING                OPTIONS(description="enum: 'Positive' | 'Neutral' | 'Negative'"),
+  keywords      STRING                OPTIONS(description="5 keyword English dipisah koma"),
+  keywords_id   STRING                OPTIONS(description="5 keyword Bahasa Indonesia dipisah koma"),
+  city          STRING                OPTIONS(description="Kota Indonesia atau '' kalau tidak disebut"),
+  province      STRING                OPTIONS(description="Provinsi Indonesia (nama resmi) atau ''"),
+  language      STRING                OPTIONS(description="ISO 639-1. Selalu 'en' setelah dual-column refactor; field di-keep untuk backward compat"),
+  scraped_at    TIMESTAMP NOT NULL  OPTIONS(description="Waktu loader memasukkan row ini")
 )
 PARTITION BY DATE(date)
 CLUSTER BY id, category, subcategory

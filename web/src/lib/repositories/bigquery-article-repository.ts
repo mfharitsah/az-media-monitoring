@@ -48,14 +48,17 @@ function normalizeRow(row: Record<string, BQValue>): Article {
   return ArticleSchema.parse({
     id: row.id,
     headline: row.headline,
+    headline_id: row.headline_id ?? null,
     url: row.url,
     date: norm(row.date),
     source: row.source ?? null,
     summary: row.summary ?? null,
+    summary_id: row.summary_id ?? null,
     category: row.category ?? null,
     subcategory: row.subcategory ?? null,
     sentiment: row.sentiment ?? null,
     keywords: row.keywords ?? null,
+    keywords_id: row.keywords_id ?? null,
     city: row.city ?? null,
     province: row.province ?? null,
     language: row.language ?? null,
@@ -86,8 +89,13 @@ const loadSnapshot = unstable_cache(
   async (): Promise<Snapshot> => {
     const sql = `
       SELECT
-        id, headline, url, date, source, summary,
-        category, subcategory, sentiment, keywords, city, province,
+        id,
+        headline, headline_id,
+        url, date, source,
+        summary, summary_id,
+        category, subcategory, sentiment,
+        keywords, keywords_id,
+        city, province,
         language, scraped_at
       FROM ${tbl("articles_latest")}
       ORDER BY date DESC

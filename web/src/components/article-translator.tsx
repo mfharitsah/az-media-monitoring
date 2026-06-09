@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Calendar, Clock, Globe, Languages, Loader2, MapPin } from "lucide-react";
+import { Calendar, Clock, Globe, Languages, MapPin } from "lucide-react";
 import { format, parseISO } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
@@ -16,82 +16,37 @@ import type { Article } from "@/lib/types";
 type Lang = "en" | "id";
 
 /**
- * Versi translasi yang disimpan client-side setelah pertama kali fetch
- * (avoid re-hit ke /api/translate kalau user toggle bolak-balik).
- */
-interface TranslationCache {
-  headline: string;
-  summary: string;
-  keywords: string;
-}
-
-/**
  * Client wrapper untuk bagian utama artikel yang BISA di-toggle bahasanya.
  * Server-rendered shell (page.tsx) tetap punya badges/source/dates/link.
  *
- * Default: tampilkan field dari `article` (sudah English di BQ).
- * Klik "Translate to Indonesian" → POST /api/translate → tampilkan versi ID.
+ * Dual-language di BQ: `headline/summary/keywords` = English (primary),
+ * `headline_id/summary_id/keywords_id` = Indonesian original.
+ * Toggle = swap field di state — TIDAK panggil Groq, instant + gratis.
+ *
+ * Edge case: artikel fallback (Groq gagal di pipeline) punya field EN dan ID
+ * isi sama. Toggle tetap jalan tapi tidak ada perubahan visible.
  */
 export function ArticleTranslator({ article }: { article: Article }) {
-  const [lang, setLang] = useState<Lang>(
-    (article.language as Lang | null) === "id" ? "id" : "en",
-  );
-  const [translated, setTranslated] = useState<TranslationCache | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [lang, setLang] = useState<Lang>("en");
 
-  const original: TranslationCache = {
-    headline: article.headline,
-    summary: article.summary ?? "",
-    keywords: article.keywords ?? "",
-  };
+  // Indonesian fallback ke English kalau _id field NULL (mis. artikel lama
+  // sebelum dual-column rollout, atau pipeline corruption).
+  const idHeadline = article.headline_id ?? article.headline;
+  const idSummary = article.summary_id ?? article.summary ?? "";
+  const idKeywords = article.keywords_id ?? article.keywords ?? "";
 
-  // Toggle target — kalau current = en, terjemahkan ke id; sebaliknya.
-  // Karena data BQ semua en, "original" = en, "translated" = id.
-  // Tetap diparameterize biar future-proof kalau ada artikel id di BQ.
-  const originalLang: Lang = (article.language as Lang | null) === "id" ? "id" : "en";
-  const targetLang: Lang = originalLang === "en" ? "id" : "en";
-  const isShowingOriginal = lang === originalLang;
-
-  const handleToggle = async () => {
-    if (!isShowingOriginal) {
-      // Sudah di-translate, balik ke original
-      setLang(originalLang);
-      return;
-    }
-    if (translated) {
-      // Sudah pernah fetch — tinggal swap state
-      setLang(targetLang);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          headline: original.headline,
-          summary: original.summary,
-          keywords: original.keywords,
-          target: targetLang,
-        }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `HTTP ${res.status}`);
+  const display = lang === "en"
+    ? {
+        headline: article.headline,
+        summary: article.summary ?? "",
+        keywords: article.keywords ?? "",
       }
-      const data = (await res.json()) as TranslationCache;
-      setTranslated(data);
-      setLang(targetLang);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Translation failed");
-    } finally {
-      setLoading(false);
-    }
-  };
+    : {
+        headline: idHeadline,
+        summary: idSummary,
+        keywords: idKeywords,
+      };
 
-  const display = isShowingOriginal ? original : (translated ?? original);
   const keywords = display.keywords
     .split(",")
     .map((k) => k.trim())
@@ -103,11 +58,9 @@ export function ArticleTranslator({ article }: { article: Article }) {
   );
   const scrapedDate = format(parseISO(article.scraped_at), "d MMM yyyy HH:mm");
 
-  const buttonLabel = isShowingOriginal
-    ? targetLang === "id"
-      ? "Translate to Indonesian"
-      : "Translate to English"
-    : `Show original (${originalLang.toUpperCase()})`;
+  const toggle = () => setLang((l) => (l === "en" ? "id" : "en"));
+  const buttonLabel =
+    lang === "en" ? "Translate to Indonesian" : "Show English";
 
   return (
     <>
@@ -118,9 +71,6 @@ export function ArticleTranslator({ article }: { article: Article }) {
         <Badge variant="outline" className="font-normal">
           <Globe className="mr-1 h-3 w-3" />
           {lang.toUpperCase()}
-          {!isShowingOriginal && (
-            <span className="ml-1 text-muted-foreground">(translated)</span>
-          )}
         </Badge>
       </div>
 
@@ -156,20 +106,12 @@ export function ArticleTranslator({ article }: { article: Article }) {
         <Button
           variant="outline"
           size="sm"
-          onClick={handleToggle}
-          disabled={loading}
+          onClick={toggle}
           className="gap-2"
         >
-          {loading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Languages className="h-3.5 w-3.5" />
-          )}
-          {loading ? "Translating..." : buttonLabel}
+          <Languages className="h-3.5 w-3.5" />
+          {buttonLabel}
         </Button>
-        {error && (
-          <span className="text-sm text-destructive">{error}</span>
-        )}
       </div>
 
       {/* Summary */}

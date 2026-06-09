@@ -19,7 +19,7 @@ permissions:
 jobs:
   scrape-and-load:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -45,19 +45,14 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCP_SA_JSON }}
 
-      - name: Run scraper (fetch + LM analysis)
+      - name: Run scraper (fetch + LM analysis + ID/EN translation)
+        # fetch_news.py sekarang produce dual-language output (Indonesian + English)
+        # dalam SATU Groq call per artikel. Tidak perlu step translate terpisah.
         run: |
           python fetch_news.py \
             --use-groq \
             --hours "${{ github.event.inputs.hours || '24' }}" \
             --output news.csv
-
-      - name: Translate headline/summary/keywords to English
-        # Digest email dikirim ke CLT — semua artikel harus English sebelum load.
-        # `--input news.json --output news.json` overwrite in-place.
-        # Artikel yang sudah English passthrough; bahasa lain di-translate via Groq.
-        # Kalau Groq gagal di sebagian artikel, mereka ter-skip (tidak masuk output).
-        run: python translate_articles.py --input news.json --output news.json
 
       - name: Load to BigQuery
         # bq_load.py skip gracefully kalau JSON kosong (0 artikel) — exit 0.

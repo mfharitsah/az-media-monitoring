@@ -38,17 +38,25 @@ export const SUBCATEGORY_TO_CATEGORY: Record<
   "General Health Regulation": "Regulatory/Policy",
 };
 
+/**
+ * Dual-language: `headline`, `summary`, `keywords` = English (primary display).
+ * `headline_id`, `summary_id`, `keywords_id` = Indonesian original.
+ * Translate toggle di UI swap antara dua versi tanpa Groq call.
+ */
 export const ArticleSchema = z.object({
   id: z.string(),
-  headline: z.string(),
+  headline: z.string(),                       // English
+  headline_id: z.string().nullable(),         // Indonesian (RSS original)
   url: z.url(),
   date: z.string(), // ISO timestamp; BQ TIMESTAMP serialized as string
   source: z.string().nullable(),
-  summary: z.string().nullable(),
+  summary: z.string().nullable(),             // English
+  summary_id: z.string().nullable(),          // Indonesian
   category: ArticleCategorySchema.nullable(),
   subcategory: ArticleSubcategorySchema.nullable(),
   sentiment: ArticleSentimentSchema.nullable(),
-  keywords: z.string().nullable(),
+  keywords: z.string().nullable(),            // English
+  keywords_id: z.string().nullable(),         // Indonesian
   city: z.string().nullable(),
   province: z.string().nullable(),
   language: z.string().nullable(),

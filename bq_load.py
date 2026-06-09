@@ -39,15 +39,18 @@ DEFAULT_LOCATION = "asia-southeast2"  # harus match lokasi dataset
 # Order tidak harus match urutan field di JSON, BigQuery match by name.
 BQ_SCHEMA = [
     bigquery.SchemaField("id", "STRING", mode="REQUIRED"),
-    bigquery.SchemaField("headline", "STRING", mode="REQUIRED"),
+    bigquery.SchemaField("headline", "STRING", mode="REQUIRED"),     # English
+    bigquery.SchemaField("headline_id", "STRING"),                    # Indonesian
     bigquery.SchemaField("url", "STRING", mode="REQUIRED"),
     bigquery.SchemaField("date", "TIMESTAMP", mode="REQUIRED"),
     bigquery.SchemaField("source", "STRING"),
-    bigquery.SchemaField("summary", "STRING"),
+    bigquery.SchemaField("summary", "STRING"),                        # English
+    bigquery.SchemaField("summary_id", "STRING"),                     # Indonesian
     bigquery.SchemaField("category", "STRING"),
     bigquery.SchemaField("subcategory", "STRING"),
     bigquery.SchemaField("sentiment", "STRING"),
-    bigquery.SchemaField("keywords", "STRING"),
+    bigquery.SchemaField("keywords", "STRING"),                       # English
+    bigquery.SchemaField("keywords_id", "STRING"),                    # Indonesian
     bigquery.SchemaField("city", "STRING"),
     bigquery.SchemaField("province", "STRING"),
     bigquery.SchemaField("language", "STRING"),

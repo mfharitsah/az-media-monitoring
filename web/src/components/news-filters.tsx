@@ -113,10 +113,20 @@ export function NewsFilters() {
           <Select
             value={searchParams.get("category") ?? "all"}
             onValueChange={(v) => {
-              setParam("category", v);
-              // Clear subcategory ketika category ganti — subcategory yg
-              // sebelumnya valid mungkin tidak applicable di kategori baru.
-              setParam("subcategory", "all");
+              // Update category + clear subcategory dalam SATU navigation.
+              // Dua panggilan setParam berturut-turut akan saling override
+              // karena keduanya baca snapshot searchParams yang sama.
+              const params = new URLSearchParams(searchParams.toString());
+              if (!v || v === "all") {
+                params.delete("category");
+              } else {
+                params.set("category", v);
+              }
+              params.delete("subcategory");
+              params.delete("page");
+              startTransition(() => {
+                router.replace(`?${params.toString()}`, { scroll: false });
+              });
             }}
           >
             <SelectTrigger className="w-full lg:w-[190px]">

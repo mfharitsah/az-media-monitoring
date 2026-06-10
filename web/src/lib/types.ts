@@ -8,12 +8,18 @@ import { z } from "zod";
  */
 
 /**
- * 2-level taxonomy (sinkron dengan ArticleAnalysis di fetch_news.py).
+ * Hybrid taxonomy (sinkron dengan ArticleAnalysis di fetch_news.py):
+ * - Beberapa kategori punya subkategori (About AstraZeneca, Regulatory/Policy)
+ * - Beberapa kategori STANDALONE — tidak punya subkategori
+ *   (Industry & Competitor, Crisis & Disruption). Di DB row: subcategory=NULL.
+ *
  * "Not Relevant" subcategory di-skip oleh pipeline, tidak masuk DB/frontend.
  */
 export const ArticleCategorySchema = z.enum([
   "About AstraZeneca",
   "Regulatory/Policy",
+  "Industry & Competitor",
+  "Crisis & Disruption",
 ]);
 export const ArticleSubcategorySchema = z.enum([
   // About AstraZeneca
@@ -36,6 +42,25 @@ export const SUBCATEGORY_TO_CATEGORY: Record<
   "Stakeholder & Regulator": "Regulatory/Policy",
   "Pharma Policy": "Regulatory/Policy",
   "General Health Regulation": "Regulatory/Policy",
+};
+
+/**
+ * Reverse: subkategori yang valid untuk tiap kategori. Dipakai oleh
+ * filter UI (cascading dropdown) — kalau array kosong → kategori standalone
+ * (subcategory dropdown di-hide).
+ */
+export const SUBCATEGORIES_BY_CATEGORY: Record<
+  z.infer<typeof ArticleCategorySchema>,
+  ArticleSubcategory[]
+> = {
+  "About AstraZeneca": ["AZ Focus", "AZ Mentioned"],
+  "Regulatory/Policy": [
+    "Stakeholder & Regulator",
+    "Pharma Policy",
+    "General Health Regulation",
+  ],
+  "Industry & Competitor": [],
+  "Crisis & Disruption": [],
 };
 
 /**
@@ -101,8 +126,16 @@ export interface SentimentTrendPoint {
   negative: number;
 }
 
+/**
+ * Item untuk Article distribution chart. `label` bisa berupa:
+ * - ArticleSubcategory: untuk kategori yang punya subkategori
+ * - ArticleCategory: untuk standalone (Industry & Competitor, Crisis & Disruption)
+ *   → di-bubble dari column `category` saat `subcategory` NULL.
+ */
+export type DistributionLabel = ArticleSubcategory | ArticleCategory;
+
 export interface SubcategoryBreakdown {
-  subcategory: ArticleSubcategory;
+  subcategory: DistributionLabel;
   count: number;
 }
 

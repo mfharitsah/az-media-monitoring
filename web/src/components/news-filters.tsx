@@ -13,20 +13,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  ArticleCategorySchema,
+  SUBCATEGORIES_BY_CATEGORY,
+  type ArticleCategory,
+} from "@/lib/types";
 
+/**
+ * Category options — di-derive dari Zod schema agar selalu sinkron dengan types.ts.
+ */
 const CATEGORY_OPTIONS = [
   { value: "all", label: "All categories" },
-  { value: "About AstraZeneca", label: "About AstraZeneca" },
-  { value: "Regulatory/Policy", label: "Regulatory/Policy" },
-] as const;
-
-const SUBCATEGORY_OPTIONS = [
-  { value: "all", label: "All subcategories" },
-  { value: "AZ Focus", label: "AZ Focus" },
-  { value: "AZ Mentioned", label: "AZ Mentioned" },
-  { value: "Stakeholder & Regulator", label: "Stakeholder & Regulator" },
-  { value: "Pharma Policy", label: "Pharma Policy" },
-  { value: "General Health Regulation", label: "General Health Regulation" },
+  ...ArticleCategorySchema.options.map((c) => ({ value: c, label: c })),
 ] as const;
 
 const SENTIMENT_OPTIONS = [
@@ -35,6 +33,10 @@ const SENTIMENT_OPTIONS = [
   { value: "Neutral", label: "Neutral" },
   { value: "Negative", label: "Negative" },
 ] as const;
+
+function isCategory(s: string | null): s is ArticleCategory {
+  return s !== null && (ArticleCategorySchema.options as readonly string[]).includes(s);
+}
 
 /** Param yang dianggap "filter" (range tab tidak termasuk — itu periode). */
 const FILTER_KEYS = ["q", "category", "subcategory", "sentiment", "date"] as const;
@@ -110,7 +112,12 @@ export function NewsFilters() {
         <FilterField label="Category">
           <Select
             value={searchParams.get("category") ?? "all"}
-            onValueChange={(v) => setParam("category", v)}
+            onValueChange={(v) => {
+              setParam("category", v);
+              // Clear subcategory ketika category ganti — subcategory yg
+              // sebelumnya valid mungkin tidak applicable di kategori baru.
+              setParam("subcategory", "all");
+            }}
           >
             <SelectTrigger className="w-full lg:w-[190px]">
               <SelectValue placeholder="Category" />
@@ -125,23 +132,35 @@ export function NewsFilters() {
           </Select>
         </FilterField>
 
-        <FilterField label="Subcategory">
-          <Select
-            value={searchParams.get("subcategory") ?? "all"}
-            onValueChange={(v) => setParam("subcategory", v)}
-          >
-            <SelectTrigger className="w-full lg:w-[210px]">
-              <SelectValue placeholder="Subcategory" />
-            </SelectTrigger>
-            <SelectContent>
-              {SUBCATEGORY_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </FilterField>
+        {/* Subcategory cascading: hanya muncul kalau kategori yg dipilih
+            punya subkategori. Industry & Competitor + Crisis & Disruption
+            standalone → dropdown ini di-hide. */}
+        {(() => {
+          const selectedCat = searchParams.get("category");
+          if (!isCategory(selectedCat)) return null;
+          const subs = SUBCATEGORIES_BY_CATEGORY[selectedCat];
+          if (subs.length === 0) return null;
+          return (
+            <FilterField label="Subcategory">
+              <Select
+                value={searchParams.get("subcategory") ?? "all"}
+                onValueChange={(v) => setParam("subcategory", v)}
+              >
+                <SelectTrigger className="w-full lg:w-[210px]">
+                  <SelectValue placeholder="Subcategory" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{`All ${selectedCat} subcategories`}</SelectItem>
+                  {subs.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          );
+        })()}
 
         <FilterField label="Sentiment">
           <Select

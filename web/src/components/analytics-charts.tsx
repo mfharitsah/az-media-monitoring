@@ -31,7 +31,10 @@ const COLORS = {
   positive: CHART.positive,
   neutral: CHART.neutral,
   negative: CHART.negative,
-  subcategoryPalette: CHART.bySubcategory,
+  // Distribution palette = subcategory colors + warna untuk standalone
+  // categories (Industry & Competitor, Crisis & Disruption) yang muncul
+  // sebagai bar di chart walaupun bukan subcategory secara struktural.
+  distributionPalette: CHART.byDistribution,
 };
 
 export function SentimentTrendChart({ data }: { data: SentimentTrendPoint[] }) {
@@ -84,8 +87,8 @@ export function SubcategoryBreakdownChart({
   const colored = data.map((d) => ({
     ...d,
     fill:
-      COLORS.subcategoryPalette[
-        d.subcategory as keyof typeof COLORS.subcategoryPalette
+      COLORS.distributionPalette[
+        d.subcategory as keyof typeof COLORS.distributionPalette
       ] ?? "#94a3b8",
   }));
   return (

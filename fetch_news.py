@@ -79,14 +79,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 #   1. Domain harus ada di SOURCE_WHITELIST (filter sebelum Groq → hemat quota)
 #   2. Body length harus >= MIN_BODY_CHARS (filter article tanpa body lengkap)
 #   3. LM final-klasifikasikan ke Subcategory (skip "Not Relevant")
-DEFAULT_KEYWORDS = [
-    # === About AstraZeneca ===
+# Per-category keyword lists — di-gabung jadi DEFAULT_KEYWORDS, tapi disimpan
+# terpisah supaya bisa dipakai untuk targeted scrape (mis. cuma kategori baru).
+KEYWORDS_AZ = [
     "AstraZeneca",
     "AstraZeneca Indonesia",
     "AZ Forest",
     "Young Health Programme",
     "Penyakit Langka AstraZeneca",
-    # === Stakeholder & Regulator (Indonesia gov entities) ===
+]
+
+KEYWORDS_REGULATORY = [
     "BPOM obat",
     "BPJS Kesehatan formularium",
     "Kementerian Kesehatan RI farmasi",
@@ -95,12 +98,10 @@ DEFAULT_KEYWORDS = [
     "INA-CBGs",
     "TKDN farmasi",
     "e-katalog LKPP obat",
-    # === Pharma Policy (English keywords for international/local-English sources) ===
     "pharmaceutical policy Indonesia",
     "drug reimbursement Indonesia",
     "HTA Indonesia",
     "market access Indonesia pharmaceutical",
-    # === General Health Regulation (Bahasa Indonesia) ===
     "Peraturan Menteri Kesehatan",
     "regulasi farmasi Indonesia",
     "kebijakan obat Indonesia",
@@ -108,6 +109,56 @@ DEFAULT_KEYWORDS = [
     "RUU kesehatan Indonesia",
     "kebijakan harga obat",
     "regulasi uji klinis Indonesia",
+]
+
+KEYWORDS_INDUSTRY_COMPETITOR = [
+    "Roche", "Roche Indonesia",
+    "Novo Nordisk", "Novo Nordisk Indonesia",
+    "Novartis", "Novartis Indonesia",
+    "Pfizer", "Pfizer Indonesia",
+    "MSD", "MSD Indonesia",
+    "Merck Sharp Dohme",
+    "Merck Indonesia", "PT Merck Tbk",
+    "GlaxoSmithKline", "GSK Indonesia",
+    "Bayer", "Bayer Indonesia",
+    "Takeda", "Takeda Indonesia",
+    "Abbott Indonesia",
+    "Zuellig Pharma",
+]
+
+# Crisis & Disruption — AND-queries spesifik per Google News.
+# Beberapa keyword broad (banjir, gempa) jadi pakai AND dengan konteks farmasi
+# untuk narrow ke berita yang punya nuansa industri kita.
+KEYWORDS_CRISIS = [
+    "banjir AND distribusi obat",
+    "banjir AND rantai pasok",
+    "banjir AND farmasi",
+    "gempa bumi AND rumah sakit",
+    "gempa bumi AND kesehatan",
+    "tsunami Indonesia",
+    "erupsi gunung Indonesia",
+    "cuaca ekstrem Indonesia",
+    "hujan ekstrem Indonesia",
+    "bencana alam AND kesehatan",
+    "bencana nasional Indonesia",
+    "status siaga bencana",
+    "status tanggap darurat",
+    "darurat nasional",
+    "demonstrasi AND Kementerian Kesehatan",
+    "demonstrasi AND istana presiden",
+    "demonstrasi AND gedung DPR",
+    "aksi buruh AND farmasi",
+    "force majeure AND industri farmasi",
+    "gangguan logistik AND obat",
+    "obat AND evakuasi",
+]
+
+# Gabungan semua kategori. Override via --keywords kalau perlu targeted scrape.
+DEFAULT_KEYWORDS = [
+    *KEYWORDS_AZ,
+    *KEYWORDS_REGULATORY,
+    *KEYWORDS_INDUSTRY_COMPETITOR,
+    *KEYWORDS_CRISIS,
 ]
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=id&gl=ID&ceid=ID:id"
 # Real browser UA — beberapa news Indonesia (Tribunnews, Detik) blokir UA non-browser dengan 403.
@@ -260,6 +311,20 @@ Aturan translation:
 5. "General Health Regulation" — regulasi/kebijakan kesehatan UMUM (di luar farmasi spesifik): UU Kesehatan, RUU Kesehatan, Permenkes umum, kebijakan vaksin/JKN/distribusi obat, harga obat.
    Contoh: "Pemerintah terbitkan UU Kesehatan baru", "Kebijakan vaksinasi dewasa direvisi".
 
+=== Category: Industry & Competitor (standalone — tidak ada sub-level) ===
+
+6. "Industry & Competitor" — berita tentang kompetitor farmasi AstraZeneca atau dinamika industri farmasi (di luar AZ, di luar regulator/pemerintah).
+   Termasuk: Roche, Novo Nordisk, Novartis, Pfizer, MSD (Merck Sharp & Dohme), Merck, PT Merck Tbk, GlaxoSmithKline (GSK), Bayer, Takeda, Abbott, Zuellig Pharma — beserta cabang Indonesia mereka.
+   Contoh: "Roche luncurkan obat baru di Asia", "Pfizer raih izin edar vaksin di Indonesia", "Bayer Indonesia investasi pabrik".
+   CATATAN: kalau artikel utamanya tentang AstraZeneca (walaupun menyebut kompetitor), pilih "AZ Focus" atau "AZ Mentioned" alih-alih ini.
+
+=== Category: Crisis & Disruption (standalone — tidak ada sub-level) ===
+
+7. "Crisis & Disruption" — bencana alam, civil unrest, atau peristiwa yang berpotensi mengganggu operasi farmasi / rantai pasok obat / akses layanan kesehatan.
+   Termasuk: banjir, gempa bumi, tsunami, erupsi gunung, cuaca ekstrem, hujan ekstrem, bencana nasional/alam; demonstrasi (istana presiden, Kementerian Kesehatan, gedung DPR), aksi buruh, status siaga/tanggap darurat, darurat nasional; gangguan logistik obat, force majeure industri farmasi, gangguan rantai pasok, evakuasi obat.
+   Contoh: "Banjir di Jakarta ganggu distribusi obat", "Gempa Cianjur rumah sakit rusak", "Demonstrasi di gedung DPR farmasi terhambat".
+   CATATAN: kalau peristiwa terjadi tapi TIDAK ada konteks farmasi/kesehatan/distribusi → "Not Relevant".
+
 === Skip ===
 
 6. "Not Relevant" — TIDAK fit ke 5 di atas. Pilih ini kalau:
@@ -328,8 +393,15 @@ Aturan city + province:
 # Skip:
 #   - "Not Relevant"  : di-FILTER OUT di process_article, tidak masuk database
 Subcategory = Literal[
+    # About AstraZeneca
     "AZ Focus", "AZ Mentioned",
+    # Regulatory/Policy
     "Stakeholder & Regulator", "Pharma Policy", "General Health Regulation",
+    # Standalone categories (no real subcategory — di-flatten ke level kategori
+    # di process_article: row.category = label ini, row.subcategory = NULL)
+    "Industry & Competitor",
+    "Crisis & Disruption",
+    # Skip
     "Not Relevant",
 ]
 Sentiment = Literal["Positive", "Neutral", "Negative"]
@@ -340,7 +412,14 @@ SUBCATEGORY_TO_CATEGORY: dict[str, str] = {
     "Stakeholder & Regulator": "Regulatory/Policy",
     "Pharma Policy": "Regulatory/Policy",
     "General Health Regulation": "Regulatory/Policy",
+    # Self-mapping — "subcategory" ini di-promote ke level kategori
+    "Industry & Competitor": "Industry & Competitor",
+    "Crisis & Disruption": "Crisis & Disruption",
 }
+
+# Subcategory yang sebenarnya kategori standalone (tidak punya sub).
+# Di process_article, untuk subcategory ini: row.category = label, row.subcategory = NULL.
+STANDALONE_CATEGORIES: set[str] = {"Industry & Competitor", "Crisis & Disruption"}
 
 
 class ArticleAnalysis(BaseModel):
@@ -796,8 +875,16 @@ def process_article(entry, fetch_body: bool, groq: GroqClient | None) -> dict | 
                 print(f"    SKIP ({elapsed:.1f}s) — Not Relevant", file=sys.stderr)
                 return None
             category = SUBCATEGORY_TO_CATEGORY[ai.subcategory]
-            print(f"    OK ({elapsed:.1f}s) — {category}/{ai.subcategory}/{ai.sentiment}"
-                  f"{' @ ' + ai.city if ai.city else ''}", file=sys.stderr)
+            # Standalone categories (Industry & Competitor / Crisis & Disruption):
+            # tidak ada konsep subcategory di bawahnya → label dipromosikan jadi
+            # kategori dan field subcategory di-NULL-kan. Chart subcategory di
+            # frontend akan fallback ke category untuk row seperti ini.
+            is_standalone = ai.subcategory in STANDALONE_CATEGORIES
+            row_subcategory = None if is_standalone else ai.subcategory
+            print(f"    OK ({elapsed:.1f}s) — {category}"
+                  f"{'/' + ai.subcategory if not is_standalone else ''}"
+                  f"/{ai.sentiment}{' @ ' + ai.city if ai.city else ''}",
+                  file=sys.stderr)
             return {
                 **base,
                 "headline":     ai.headline_en,   # English (primary display)
@@ -805,7 +892,7 @@ def process_article(entry, fetch_body: bool, groq: GroqClient | None) -> dict | 
                 "summary":      ai.summary_en,    # English
                 "summary_id":   ai.summary_id,    # Indonesian
                 "category":     category,
-                "subcategory":  ai.subcategory,
+                "subcategory":  row_subcategory,
                 "sentiment":    ai.sentiment,
                 "keywords":     ai.keywords_en,   # English
                 "keywords_id":  ai.keywords_id,   # Indonesian

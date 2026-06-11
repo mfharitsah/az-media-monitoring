@@ -10,6 +10,10 @@ import {
   TopProvincesChart,
   TopSourcesChart,
 } from "@/components/analytics-charts";
+import {
+  AnalyticsKpiCards,
+  AnalyticsKpiCardsSkeleton,
+} from "@/components/kpi-cards";
 import { articleRepo } from "@/lib/repositories";
 import type { AnalyticsRange } from "@/lib/types";
 
@@ -53,6 +57,11 @@ export default async function AnalyticsPage({
         </div>
         <AnalyticsRangeTabs activeRange={range} />
       </header>
+
+      {/* KPI summary — streaming independen dari chart. */}
+      <Suspense key={`kpi-${range}`} fallback={<AnalyticsKpiCardsSkeleton />}>
+        <AnalyticsKpiCards range={range} />
+      </Suspense>
 
       {/* Tiap chart streaming independen — query lambat tidak block yang lain.
           `key` di-set per range supaya Suspense re-trigger saat range ganti. */}

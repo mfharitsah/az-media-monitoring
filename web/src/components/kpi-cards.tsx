@@ -4,7 +4,12 @@ import { TrendingUp, TrendingDown, Minus, Newspaper, Smile, Target } from "lucid
 import { Card, CardContent } from "@/components/ui/card";
 import { BRAND, TEXT_TONE, netSentimentColor } from "@/lib/brand";
 import { articleRepo } from "@/lib/repositories";
-import type { AllTimeKpi, ArticleListFilters, DailyKpi } from "@/lib/types";
+import type {
+  AllTimeKpi,
+  AnalyticsRange,
+  ArticleListFilters,
+  DailyKpi,
+} from "@/lib/types";
 
 // Each KPI card navigates to its own deep-dive page.
 const KPI_LINKS = {
@@ -141,6 +146,67 @@ export async function AllTimeKpiCards() {
         valueColor={BRAND.darkMulberry}
         footer={<AzBreakdown kpi={kpi} />}
       />
+    </section>
+  );
+}
+
+/**
+ * Analytics page — Total News + Sentiment for AZ News.
+ * Range-aware: ikut RangeTabs di /analytics (Last 7 days / All time).
+ *
+ * Dua call `filteredKpi` paralel:
+ * - filteredKpi({range}) → total + global sentiment
+ * - filteredKpi({range, categories: ["About AstraZeneca"]}) → AZ-only sentiment
+ * Keduanya hit cached snapshot — cost minimal.
+ */
+export async function AnalyticsKpiCards({ range }: { range: AnalyticsRange }) {
+  const [kpi, azKpi] = await Promise.all([
+    articleRepo.filteredKpi({ range }),
+    articleRepo.filteredKpi({ range, categories: ["About AstraZeneca"] }),
+  ]);
+  const netAz = azKpi.positiveCount - azKpi.negativeCount;
+  return (
+    <section className="grid gap-4 sm:grid-cols-2">
+      <KpiCard
+        href={KPI_LINKS.totalNews}
+        icon={<Newspaper className="h-4 w-4" />}
+        label="Total News"
+        value={kpi.total.toLocaleString("en-US")}
+        valueColor={BRAND.darkMulberry}
+        footer={<SentimentBreakdown kpi={kpi} />}
+      />
+      <KpiCard
+        href={KPI_LINKS.aboutAz}
+        icon={<Smile className="h-4 w-4" />}
+        label="Sentiment for AZ News"
+        value={signed(netAz)}
+        valueColor={netSentimentColor(netAz)}
+        footer={
+          <div className="space-y-1">
+            <SentimentBreakdown kpi={azKpi} />
+            <span className="block text-xs text-muted-foreground">
+              {azKpi.total} AZ article{azKpi.total === 1 ? "" : "s"}
+            </span>
+          </div>
+        }
+      />
+    </section>
+  );
+}
+
+/** Skeleton 2-card untuk AnalyticsKpiCards Suspense fallback. */
+export function AnalyticsKpiCardsSkeleton() {
+  return (
+    <section className="grid gap-4 sm:grid-cols-2">
+      {Array.from({ length: 2 }).map((_, i) => (
+        <Card key={i}>
+          <CardContent className="p-5">
+            <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+            <div className="mt-3 h-10 w-16 animate-pulse rounded bg-muted" />
+            <div className="mt-2 h-3 w-24 animate-pulse rounded bg-muted" />
+          </CardContent>
+        </Card>
+      ))}
     </section>
   );
 }

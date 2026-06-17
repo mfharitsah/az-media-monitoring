@@ -67,3 +67,49 @@ SELECT *
 FROM `az_daily_news_collection.articles_latest`
 WHERE date >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
 ORDER BY date DESC;
+
+-- =============================================================================
+-- TABLE: competitor_articles (append-only, count-only competitor tracking)
+-- =============================================================================
+-- Tujuan: track jumlah news per kompetitor AstraZeneca Indonesia tanpa
+-- scrape detail (no headline body / no LM classification). Cukup URL + metadata
+-- minimal supaya bisa di-aggregate per range filter di analytics page
+-- (Share of Voice by Company).
+--
+-- Pattern sama dengan tabel `articles`: append-only + view dedup. Tapi:
+--   - PARTITION BY DATE(published_at) — query lebih cepat untuk range filter
+--   - CLUSTER BY company — typical query group by company
+--   - Tidak ada sentiment/category/keywords — kita cuma butuh COUNT
+--
+-- Roche Indonesia adalah special case: scraper TIDAK apply SOURCE_WHITELIST
+-- untuk Roche (asumsi coverage tipis di whitelist). Lihat
+-- fetch_competitor_counts.py.
+CREATE TABLE IF NOT EXISTS `az_daily_news_collection.competitor_articles` (
+  url           STRING    NOT NULL  OPTIONS(description="URL artikel (sudah di-decode dari Google News redirect)"),
+  company       STRING    NOT NULL  OPTIONS(description="Nama kompetitor canonical: 'Roche Indonesia', 'Novo Nordisk Indonesia', dll"),
+  source        STRING                OPTIONS(description="Apex domain publikasi, mis. 'detik.com'"),
+  published_at  TIMESTAMP NOT NULL  OPTIONS(description="published_at dari RSS feed"),
+  scraped_at    TIMESTAMP NOT NULL  OPTIONS(description="Waktu loader memasukkan row ini")
+)
+PARTITION BY DATE(published_at)
+CLUSTER BY company
+OPTIONS(
+  description="Append-only competitor news count tracking. Query lewat competitor_articles_latest view.",
+  partition_expiration_days=NULL
+);
+
+-- =============================================================================
+-- VIEW: competitor_articles_latest (deduped — 1 row per (company, url))
+-- =============================================================================
+-- Dedup penting karena scrape harian rolling 24h overlap dengan scrape
+-- sebelumnya — URL yang sama bisa muncul di 2 scrape berturut-turut. Latest
+-- scraped_at wins (paling baru di-confirm masih live).
+CREATE OR REPLACE VIEW `az_daily_news_collection.competitor_articles_latest` AS
+SELECT * EXCEPT(rn)
+FROM (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (PARTITION BY company, url ORDER BY scraped_at DESC) AS rn
+  FROM `az_daily_news_collection.competitor_articles`
+)
+WHERE rn = 1;

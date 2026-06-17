@@ -70,6 +70,25 @@ jobs:
         # bq_load.py skip gracefully kalau JSON kosong (0 artikel) — exit 0.
         run: python bq_load.py news.json
 
+      - name: Scrape competitor counts (Roche, Pfizer, Novartis, etc.)
+        # Count-only scraper untuk Share of Voice tracking di analytics page.
+        # No Groq calls (quota-free). 9 competitors, ~1-2 menit total.
+        # Roche Indonesia special: tidak apply SOURCE_WHITELIST (cari semua
+        # Indonesian-language news).
+        # continue-on-error: kalau competitor scrape gagal, main pipeline
+        # tetap dianggap success — competitor data hanya supplementary.
+        continue-on-error: true
+        run: |
+          python fetch_competitor_counts.py \
+            --hours "${{ github.event.inputs.hours || '24' }}" \
+            --output competitor_news.json
+
+      - name: Load competitor counts to BigQuery
+        # competitor_articles table — separate dari articles. Append-only,
+        # dedupe via view competitor_articles_latest.
+        continue-on-error: true
+        run: python bq_load_competitors.py competitor_news.json
+
       - name: Invalidate Vercel cache
         # Beritahu Next.js drop cached articles → visitor berikutnya dapat data fresh.
         # Tanpa step ini, cache TTL 24h akan tetap serve data lama sampai expired.
@@ -92,5 +111,6 @@ jobs:
           path: |
             news.csv
             news.json
+            competitor_news.json
           retention-days: 7
           if-no-files-found: ignore

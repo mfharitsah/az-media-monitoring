@@ -61,13 +61,11 @@ export const SENTIMENT_SWATCH: Record<ArticleSentiment, Swatch> = {
 
 // Extended palette untuk kategori baru (di luar brand AZ core).
 // Dipilih distinct dari mulberry/navy/lime/magenta supaya badge & chart legible.
-const PURPLE = "#7C3AED"; // Industry & Competitor — kompetitor farmasi
 const CRISIS_RED = "#DC2626"; // Crisis & Disruption — alert/urgency
 
 export const CATEGORY_SWATCH: Record<ArticleCategory, Swatch> = {
   "About AstraZeneca": { bg: BRAND.mulberry, fg: WHITE },
   "Regulatory/Policy": { bg: BRAND.navy, fg: WHITE },
-  "Industry & Competitor": { bg: PURPLE, fg: WHITE },
   "Crisis & Disruption": { bg: CRISIS_RED, fg: WHITE },
 };
 
@@ -91,7 +89,6 @@ export const SUBCATEGORY_STRIPE: Record<ArticleSubcategory, string> = {
 export const CATEGORY_STRIPE: Record<ArticleCategory, string> = {
   "About AstraZeneca": BRAND.mulberry,
   "Regulatory/Policy": BRAND.navy,
-  "Industry & Competitor": PURPLE,
   "Crisis & Disruption": CRISIS_RED,
 };
 
@@ -108,12 +105,11 @@ export function netSentimentColor(net: number): string {
 
 /**
  * Palette untuk Article Distribution chart. Merge SUBCATEGORY_STRIPE +
- * 2 standalone category colors — chart bar label bisa berupa subcategory
- * (yang punya parent) atau category name (untuk Industry/Crisis).
+ * standalone category color — chart bar label bisa berupa subcategory
+ * (yang punya parent) atau category name (untuk Crisis & Disruption).
  */
 const DISTRIBUTION_PALETTE = {
   ...SUBCATEGORY_STRIPE,
-  "Industry & Competitor": PURPLE,
   "Crisis & Disruption": CRISIS_RED,
 } as const;
 

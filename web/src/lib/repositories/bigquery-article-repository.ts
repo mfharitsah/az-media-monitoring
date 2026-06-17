@@ -302,9 +302,9 @@ export const bigQueryArticleRepository: ArticleRepository = {
     const counts = new Map<string, number>();
     for (const a of articles) {
       if (!inAnalyticsRange(a, range)) continue;
-      // Standalone kategori (Industry & Competitor, Crisis & Disruption)
-      // punya subcategory=NULL → bubble label dari kolom category supaya
-      // mereka muncul di Article Distribution chart.
+      // Standalone kategori (Crisis & Disruption) punya subcategory=NULL →
+      // bubble label dari kolom category supaya mereka muncul di Article
+      // Distribution chart.
       const label = a.subcategory ?? a.category;
       if (!label) continue;
       counts.set(label, (counts.get(label) ?? 0) + 1);

@@ -32,8 +32,8 @@ const COLORS = {
   neutral: CHART.neutral,
   negative: CHART.negative,
   // Distribution palette = subcategory colors + warna untuk standalone
-  // categories (Industry & Competitor, Crisis & Disruption) yang muncul
-  // sebagai bar di chart walaupun bukan subcategory secara struktural.
+  // category (Crisis & Disruption) yang muncul sebagai bar di chart
+  // walaupun bukan subcategory secara struktural.
   distributionPalette: CHART.byDistribution,
 };
 

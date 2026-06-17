@@ -10,15 +10,16 @@ import { z } from "zod";
 /**
  * Hybrid taxonomy (sinkron dengan ArticleAnalysis di fetch_news.py):
  * - Beberapa kategori punya subkategori (About AstraZeneca, Regulatory/Policy)
- * - Beberapa kategori STANDALONE — tidak punya subkategori
- *   (Industry & Competitor, Crisis & Disruption). Di DB row: subcategory=NULL.
+ * - Crisis & Disruption STANDALONE — tidak punya subkategori. Di DB row: subcategory=NULL.
  *
  * "Not Relevant" subcategory di-skip oleh pipeline, tidak masuk DB/frontend.
+ *
+ * Industry & Competitor: SUDAH DIHAPUS sebagai kategori news utama (tracking
+ * kompetitor dipisah ke fetch_competitor_counts.py — count-only, beda table).
  */
 export const ArticleCategorySchema = z.enum([
   "About AstraZeneca",
   "Regulatory/Policy",
-  "Industry & Competitor",
   "Crisis & Disruption",
 ]);
 export const ArticleSubcategorySchema = z.enum([
@@ -59,7 +60,6 @@ export const SUBCATEGORIES_BY_CATEGORY: Record<
     "Pharma Policy",
     "General Health Regulation",
   ],
-  "Industry & Competitor": [],
   "Crisis & Disruption": [],
 };
 
@@ -129,7 +129,7 @@ export interface SentimentTrendPoint {
 /**
  * Item untuk Article distribution chart. `label` bisa berupa:
  * - ArticleSubcategory: untuk kategori yang punya subkategori
- * - ArticleCategory: untuk standalone (Industry & Competitor, Crisis & Disruption)
+ * - ArticleCategory: untuk standalone (Crisis & Disruption)
  *   → di-bubble dari column `category` saat `subcategory` NULL.
  */
 export type DistributionLabel = ArticleSubcategory | ArticleCategory;

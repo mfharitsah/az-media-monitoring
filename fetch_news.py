@@ -89,11 +89,25 @@ KEYWORDS_AZ = [
     "Penyakit Langka AstraZeneca",
 ]
 
-KEYWORDS_REGULATORY = [
+# Regulatory/Policy keywords — di-pecah per subcategory untuk dokumentasi +
+# priority ordering. LM tetap classify final subcategory di runtime (keyword
+# hanya hint, bukan binding hard). Urutan within Regulatory:
+#   Stakeholder & Regulator > Pharma Policy > General Health Regulation
+KEYWORDS_STAKEHOLDER = [
+    # Existing — institusi
     "BPOM obat",
     "BPJS Kesehatan formularium",
     "Kementerian Kesehatan RI farmasi",
     "Komisi IX DPR kesehatan",
+    # New — pejabat & jabatan
+    "Menkes RI",
+    "Wamenkes RI",
+    "Budi Gunadi Sadikin",
+    "Benjamin Paulus Octavianus",
+]
+
+KEYWORDS_PHARMA_POLICY = [
+    # Existing
     "Formularium Nasional Fornas",
     "INA-CBGs",
     "TKDN farmasi",
@@ -102,28 +116,35 @@ KEYWORDS_REGULATORY = [
     "drug reimbursement Indonesia",
     "HTA Indonesia",
     "market access Indonesia pharmaceutical",
+    "kebijakan harga obat",
+    "regulasi uji klinis Indonesia",
+    # New
+    "Ekspor farmasi",
+    "Harga obat",
+    "Pengobatan inovatif",
+    "Pengobatan presisi",
+    "Akses obat inovatif",
+]
+
+KEYWORDS_GEN_HEALTH_REG = [
+    # Existing
     "Peraturan Menteri Kesehatan",
     "regulasi farmasi Indonesia",
     "kebijakan obat Indonesia",
     "kebijakan vaksin Indonesia",
     "RUU kesehatan Indonesia",
-    "kebijakan harga obat",
-    "regulasi uji klinis Indonesia",
+    # New
+    "Prabowo AND Kesehatan",
+    "Kesehatan AI",
+    "Peraturan Kesehatan",
+    "CKG (Cek Kesehatan Gratis)",
+    "WHO",
 ]
 
-KEYWORDS_INDUSTRY_COMPETITOR = [
-    "Roche", "Roche Indonesia",
-    "Novo Nordisk", "Novo Nordisk Indonesia",
-    "Novartis", "Novartis Indonesia",
-    "Pfizer", "Pfizer Indonesia",
-    "MSD", "MSD Indonesia",
-    "Merck Sharp Dohme",
-    "Merck Indonesia", "PT Merck Tbk",
-    "GlaxoSmithKline", "GSK Indonesia",
-    "Bayer", "Bayer Indonesia",
-    "Takeda", "Takeda Indonesia",
-    "Abbott Indonesia",
-    "Zuellig Pharma",
+KEYWORDS_REGULATORY = [
+    *KEYWORDS_STAKEHOLDER,
+    *KEYWORDS_PHARMA_POLICY,
+    *KEYWORDS_GEN_HEALTH_REG,
 ]
 
 # Crisis & Disruption — AND-queries spesifik per Google News.
@@ -154,10 +175,11 @@ KEYWORDS_CRISIS = [
 ]
 
 # Gabungan semua kategori. Override via --keywords kalau perlu targeted scrape.
+# Industry/Competitor news scrape SUDAH DIHAPUS — count-only via
+# fetch_competitor_counts.py. AZ → Regulatory → Crisis priority order.
 DEFAULT_KEYWORDS = [
     *KEYWORDS_AZ,
     *KEYWORDS_REGULATORY,
-    *KEYWORDS_INDUSTRY_COMPETITOR,
     *KEYWORDS_CRISIS,
 ]
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=id&gl=ID&ceid=ID:id"
@@ -311,27 +333,20 @@ Aturan translation:
 5. "General Health Regulation" — regulasi/kebijakan kesehatan UMUM (di luar farmasi spesifik): UU Kesehatan, RUU Kesehatan, Permenkes umum, kebijakan vaksin/JKN/distribusi obat, harga obat.
    Contoh: "Pemerintah terbitkan UU Kesehatan baru", "Kebijakan vaksinasi dewasa direvisi".
 
-=== Category: Industry & Competitor (standalone — tidak ada sub-level) ===
-
-6. "Industry & Competitor" — berita tentang kompetitor farmasi AstraZeneca atau dinamika industri farmasi (di luar AZ, di luar regulator/pemerintah).
-   Termasuk: Roche, Novo Nordisk, Novartis, Pfizer, MSD (Merck Sharp & Dohme), Merck, PT Merck Tbk, GlaxoSmithKline (GSK), Bayer, Takeda, Abbott, Zuellig Pharma — beserta cabang Indonesia mereka.
-   Contoh: "Roche luncurkan obat baru di Asia", "Pfizer raih izin edar vaksin di Indonesia", "Bayer Indonesia investasi pabrik".
-   CATATAN: kalau artikel utamanya tentang AstraZeneca (walaupun menyebut kompetitor), pilih "AZ Focus" atau "AZ Mentioned" alih-alih ini.
-
 === Category: Crisis & Disruption (standalone — tidak ada sub-level) ===
 
-7. "Crisis & Disruption" — bencana alam, civil unrest, atau peristiwa yang berpotensi mengganggu operasi farmasi / rantai pasok obat / akses layanan kesehatan.
+6. "Crisis & Disruption" — bencana alam, civil unrest, atau peristiwa yang berpotensi mengganggu operasi farmasi / rantai pasok obat / akses layanan kesehatan.
    Termasuk: banjir, gempa bumi, tsunami, erupsi gunung, cuaca ekstrem, hujan ekstrem, bencana nasional/alam; demonstrasi (istana presiden, Kementerian Kesehatan, gedung DPR), aksi buruh, status siaga/tanggap darurat, darurat nasional; gangguan logistik obat, force majeure industri farmasi, gangguan rantai pasok, evakuasi obat.
    Contoh: "Banjir di Jakarta ganggu distribusi obat", "Gempa Cianjur rumah sakit rusak", "Demonstrasi di gedung DPR farmasi terhambat".
    CATATAN: kalau peristiwa terjadi tapi TIDAK ada konteks farmasi/kesehatan/distribusi → "Not Relevant".
 
 === Skip ===
 
-6. "Not Relevant" — TIDAK fit ke 5 di atas. Pilih ini kalau:
+7. "Not Relevant" — TIDAK fit ke 5 di atas. Pilih ini kalau:
    - Artikel kesehatan umum tanpa konteks AZ/farmasi/regulasi
    - Artikel BPJS layanan klaim/keanggotaan umum (bukan obat/farmasi)
    - Artikel pejabat/politik tanpa relevansi farmasi/kesehatan
-   - Artikel kompetitor TANPA konteks AZ atau industri farmasi
+   - Artikel KOMPETITOR farmasi (Roche, Pfizer, Novartis, dll) — tracking competitor sudah dipisah ke count-only pipeline, tidak masuk DB news utama.
    PENTING: "Not Relevant" akan di-skip. Jangan paksa fit kalau memang tidak relevan.
 
 Aturan sentiment dari sudut pandang AstraZeneca:
@@ -397,9 +412,8 @@ Subcategory = Literal[
     "AZ Focus", "AZ Mentioned",
     # Regulatory/Policy
     "Stakeholder & Regulator", "Pharma Policy", "General Health Regulation",
-    # Standalone categories (no real subcategory — di-flatten ke level kategori
+    # Standalone category (no real subcategory — di-flatten ke level kategori
     # di process_article: row.category = label ini, row.subcategory = NULL)
-    "Industry & Competitor",
     "Crisis & Disruption",
     # Skip
     "Not Relevant",
@@ -413,13 +427,12 @@ SUBCATEGORY_TO_CATEGORY: dict[str, str] = {
     "Pharma Policy": "Regulatory/Policy",
     "General Health Regulation": "Regulatory/Policy",
     # Self-mapping — "subcategory" ini di-promote ke level kategori
-    "Industry & Competitor": "Industry & Competitor",
     "Crisis & Disruption": "Crisis & Disruption",
 }
 
 # Subcategory yang sebenarnya kategori standalone (tidak punya sub).
 # Di process_article, untuk subcategory ini: row.category = label, row.subcategory = NULL.
-STANDALONE_CATEGORIES: set[str] = {"Industry & Competitor", "Crisis & Disruption"}
+STANDALONE_CATEGORIES: set[str] = {"Crisis & Disruption"}
 
 
 class ArticleAnalysis(BaseModel):
@@ -893,10 +906,10 @@ def process_article(entry, fetch_body: bool, groq: GroqClient | None) -> dict | 
                 print(f"    SKIP ({elapsed:.1f}s) — Not Relevant", file=sys.stderr)
                 return None
             category = SUBCATEGORY_TO_CATEGORY[ai.subcategory]
-            # Standalone categories (Industry & Competitor / Crisis & Disruption):
-            # tidak ada konsep subcategory di bawahnya → label dipromosikan jadi
-            # kategori dan field subcategory di-NULL-kan. Chart subcategory di
-            # frontend akan fallback ke category untuk row seperti ini.
+            # Standalone category (Crisis & Disruption): tidak ada konsep
+            # subcategory di bawahnya → label dipromosikan jadi kategori dan
+            # field subcategory di-NULL-kan. Chart subcategory di frontend akan
+            # fallback ke category untuk row seperti ini.
             is_standalone = ai.subcategory in STANDALONE_CATEGORIES
             row_subcategory = None if is_standalone else ai.subcategory
             print(f"    OK ({elapsed:.1f}s) — {category}"
@@ -945,7 +958,7 @@ def process_article(entry, fetch_body: bool, groq: GroqClient | None) -> dict | 
 def fetch_news(keywords: list[str], hours: int, fetch_body: bool,
                groq: GroqClient | None, max_per_keyword: int = 5) -> list[dict]:
     """Iterate semua keyword (sudah priority-ordered di DEFAULT_KEYWORDS:
-    AZ → Regulatory → Industry → Crisis), process artikel, return list.
+    AZ → Regulatory → Crisis), process artikel, return list.
 
     `max_per_keyword` — cap artikel ter-save per keyword. Lindungi dari burst
     news (mis. 1 keyword "gempa AND rumah sakit" return 20 artikel mirip).
@@ -1088,7 +1101,7 @@ def main() -> None:
 
     keywords = [k.strip() for k in args.keywords.split(",") if k.strip()]
     print(f"[*] Processing {len(keywords)} keywords (priority-ordered: "
-          f"AZ → Regulatory → Industry → Crisis), cap={args.max_per_keyword}/keyword",
+          f"AZ → Regulatory → Crisis), cap={args.max_per_keyword}/keyword",
           file=sys.stderr)
     articles = fetch_news(
         keywords=keywords,

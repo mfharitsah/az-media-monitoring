@@ -143,8 +143,8 @@ export function NewsFilters() {
         </FilterField>
 
         {/* Subcategory cascading: hanya muncul kalau kategori yg dipilih
-            punya subkategori. Industry & Competitor + Crisis & Disruption
-            standalone → dropdown ini di-hide. */}
+            punya subkategori. Crisis & Disruption standalone → dropdown
+            ini di-hide. */}
         {(() => {
           const selectedCat = searchParams.get("category");
           if (!isCategory(selectedCat)) return null;

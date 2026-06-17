@@ -97,7 +97,19 @@ export type ArticleSentiment = z.infer<typeof ArticleSentimentSchema>;
 // Filter / query params untuk list pages
 // =============================================================================
 
-export type DateRange = "last-24h" | "last-7-days" | "all-time" | "custom";
+/**
+ * Range filter untuk list pages.
+ *
+ * Semester variants (`h1-YYYY`, `h2-YYYY`) shared dengan `AnalyticsRange` —
+ * supaya KPI di analytics page bisa reuse `filteredKpi` saat user pilih semester.
+ */
+export type DateRange =
+  | "last-24h"
+  | "last-7-days"
+  | "all-time"
+  | "custom"
+  | `h1-${number}`
+  | `h2-${number}`;
 
 export interface ArticleListFilters {
   range: DateRange;
@@ -139,8 +151,39 @@ export interface SubcategoryBreakdown {
   count: number;
 }
 
-/** Rentang waktu untuk halaman Analytics. */
-export type AnalyticsRange = "last-7-days" | "all-time";
+/**
+ * Rentang waktu untuk halaman Analytics.
+ *
+ * Selain "last-7-days" & "all-time", mendukung filter semester berformat
+ * `h1-YYYY` / `h2-YYYY` (kalender semester per tahun):
+ *   - H1: Januari–Juni
+ *   - H2: Juli–Desember
+ *
+ * Tahun harus integer 4-digit. Validate via `isAnalyticsRange()` / `parseSemester()`
+ * sebelum trust input dari URL.
+ */
+export type AnalyticsRange =
+  | "last-7-days"
+  | "all-time"
+  | `h1-${number}`
+  | `h2-${number}`;
+
+/** Parse semester range string. Return null kalau bukan semester format. */
+export function parseSemester(range: string): { half: 1 | 2; year: number } | null {
+  const m = /^h([12])-(\d{4})$/.exec(range);
+  if (!m) return null;
+  const half = Number(m[1]) as 1 | 2;
+  const year = Number(m[2]);
+  // Sanity: tahun >= 2020 (project belum ada sebelum itu) dan <= 2100
+  if (year < 2020 || year > 2100) return null;
+  return { half, year };
+}
+
+/** Type guard: cek string adalah AnalyticsRange valid. */
+export function isAnalyticsRange(s: string): s is AnalyticsRange {
+  if (s === "last-7-days" || s === "all-time") return true;
+  return parseSemester(s) !== null;
+}
 
 export interface TopSource {
   source: string;
@@ -150,6 +193,31 @@ export interface TopSource {
 export interface TopProvince {
   province: string;
   count: number;
+}
+
+/**
+ * Share of Voice — 1 row per company (AZ + 9 competitors).
+ * `isAz=true` untuk row AstraZeneca → di-highlight di UI.
+ */
+export interface ShareOfVoiceRow {
+  rank: number;
+  company: string;
+  count: number;
+  /** % of total across all companies (AZ + competitors). 0-100. */
+  sharePct: number;
+  isAz: boolean;
+}
+
+/** Top keyword/topic untuk AZ-related news (category = About AstraZeneca). */
+export interface TopAzTopic {
+  keyword: string;
+  count: number;
+}
+
+/** Date bounds untuk derive available semester options di UI. */
+export interface DateBounds {
+  minYear: number;
+  maxYear: number;
 }
 
 /**

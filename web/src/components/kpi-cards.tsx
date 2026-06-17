@@ -170,7 +170,7 @@ export async function AnalyticsKpiCards({ range }: { range: AnalyticsRange }) {
       <KpiCard
         href={KPI_LINKS.totalNews}
         icon={<Newspaper className="h-4 w-4" />}
-        label="Total News"
+        label="Total News Coverage"
         value={kpi.total.toLocaleString("en-US")}
         valueColor={BRAND.darkMulberry}
         footer={<SentimentBreakdown kpi={kpi} />}
@@ -178,7 +178,7 @@ export async function AnalyticsKpiCards({ range }: { range: AnalyticsRange }) {
       <KpiCard
         href={KPI_LINKS.aboutAz}
         icon={<Smile className="h-4 w-4" />}
-        label="Sentiment for AZ News"
+        label="Tonality/Sentiment for AZ News"
         value={signed(netAz)}
         valueColor={netSentimentColor(netAz)}
         footer={

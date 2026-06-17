@@ -2,14 +2,18 @@ import { unstable_cache } from "next/cache";
 import { bq, tbl } from "@/lib/bigquery";
 import {
   ArticleSchema,
+  parseSemester,
   type AllTimeKpi,
   type AnalyticsRange,
   type Article,
   type ArticleListFilters,
   type DailyKpi,
+  type DateBounds,
   type DateRange,
   type SentimentTrendPoint,
+  type ShareOfVoiceRow,
   type SubcategoryBreakdown,
+  type TopAzTopic,
   type TopProvince,
   type TopSource,
 } from "@/lib/types";
@@ -114,6 +118,47 @@ const loadSnapshot = unstable_cache(
 );
 
 // =============================================================================
+// Competitor snapshot — separate cache entry (different BQ table)
+// =============================================================================
+
+interface CompetitorRow {
+  url: string;
+  company: string;
+  source: string | null;
+  /** ISO timestamp string (BigQuery TIMESTAMP) */
+  published_at: string;
+}
+
+interface CompetitorSnapshot {
+  rows: CompetitorRow[];
+}
+
+const loadCompetitorSnapshot = unstable_cache(
+  async (): Promise<CompetitorSnapshot> => {
+    const sql = `
+      SELECT url, company, source, published_at
+      FROM ${tbl("competitor_articles_latest")}
+      ORDER BY published_at DESC
+    `;
+    const [rows] = await bq().query({ query: sql });
+    const norm = (v: BQValue): string | null => {
+      if (v == null) return null;
+      if (typeof v === "object" && "value" in v) return v.value;
+      return v;
+    };
+    const normalized: CompetitorRow[] = rows.map((r: Record<string, BQValue>) => ({
+      url: String(r.url),
+      company: String(r.company),
+      source: r.source != null ? String(r.source) : null,
+      published_at: norm(r.published_at) ?? "",
+    }));
+    return { rows: normalized };
+  },
+  ["competitor-snapshot"],
+  { revalidate: CACHE_TTL_SEC, tags: [CACHE_TAG] },
+);
+
+// =============================================================================
 // Date helpers (Asia/Jakarta, no DST)
 // =============================================================================
 
@@ -152,22 +197,43 @@ function inListRange(
   anchorMs: number,
   customDate?: string,
 ): boolean {
-  switch (range) {
-    case "all-time":
-      return true;
-    case "last-24h":
-      return new Date(a.date).getTime() >= anchorMs - 24 * 3600 * 1000;
-    case "last-7-days":
-      return jakartaDate(a.date) >= jakartaDateMinusDays(6);
-    case "custom":
-      return customDate ? jakartaDate(a.date) === customDate : true;
+  // Semester variants — share semantik dengan dateInAnalyticsRange.
+  if (range.startsWith("h1-") || range.startsWith("h2-")) {
+    return dateInAnalyticsRange(a.date, range as AnalyticsRange);
   }
+  if (range === "all-time") return true;
+  if (range === "last-24h") {
+    return new Date(a.date).getTime() >= anchorMs - 24 * 3600 * 1000;
+  }
+  if (range === "last-7-days") {
+    return jakartaDate(a.date) >= jakartaDateMinusDays(6);
+  }
+  // custom
+  return customDate ? jakartaDate(a.date) === customDate : true;
 }
 
-/** Cek apakah artikel masuk rentang Analytics. */
-function inAnalyticsRange(a: Article, range: AnalyticsRange): boolean {
+/**
+ * Cek apakah ISO date string masuk rentang Analytics.
+ * Range bisa berupa "last-7-days", "all-time", atau `h1-YYYY`/`h2-YYYY`.
+ * Dipakai untuk article date DAN competitor published_at (semua di Jakarta timezone).
+ */
+function dateInAnalyticsRange(iso: string, range: AnalyticsRange): boolean {
   if (range === "all-time") return true;
-  return jakartaDate(a.date) >= jakartaDateMinusDays(6);
+  if (range === "last-7-days") {
+    return jakartaDate(iso) >= jakartaDateMinusDays(6);
+  }
+  // Semester: h1-YYYY → YYYY-01-01..YYYY-06-30, h2-YYYY → YYYY-07-01..YYYY-12-31
+  const sem = parseSemester(range);
+  if (!sem) return false;
+  const d = jakartaDate(iso);
+  const startMonth = sem.half === 1 ? "01-01" : "07-01";
+  const endMonth = sem.half === 1 ? "06-30" : "12-31";
+  return d >= `${sem.year}-${startMonth}` && d <= `${sem.year}-${endMonth}`;
+}
+
+/** Wrapper untuk Article (legacy callers). */
+function inAnalyticsRange(a: Article, range: AnalyticsRange): boolean {
+  return dateInAnalyticsRange(a.date, range);
 }
 
 function matchesFilters(
@@ -317,11 +383,13 @@ export const bigQueryArticleRepository: ArticleRepository = {
       .sort((x, y) => y.count - x.count);
   },
 
-  async topSources(range, limit): Promise<TopSource[]> {
+  async topSources(range, limit, opts): Promise<TopSource[]> {
     const { articles } = await loadSnapshot();
+    const azOnly = opts?.azOnly ?? false;
     const counts = new Map<string, number>();
     for (const a of articles) {
       if (!inAnalyticsRange(a, range)) continue;
+      if (azOnly && a.category !== "About AstraZeneca") continue;
       if (!a.source) continue;
       counts.set(a.source, (counts.get(a.source) ?? 0) + 1);
     }
@@ -343,5 +411,79 @@ export const bigQueryArticleRepository: ArticleRepository = {
       .map(([province, count]) => ({ province, count }))
       .sort((x, y) => y.count - x.count)
       .slice(0, limit);
+  },
+
+  async shareOfVoice(range): Promise<ShareOfVoiceRow[]> {
+    const [{ articles }, { rows: competitorRows }] = await Promise.all([
+      loadSnapshot(),
+      loadCompetitorSnapshot(),
+    ]);
+
+    // AZ count: artikel category=About AstraZeneca dalam range.
+    const azCount = articles.filter(
+      (a) => a.category === "About AstraZeneca" && inAnalyticsRange(a, range),
+    ).length;
+
+    // Competitor counts: per company, count rows dalam range.
+    const competitorCounts = new Map<string, number>();
+    for (const r of competitorRows) {
+      if (!dateInAnalyticsRange(r.published_at, range)) continue;
+      competitorCounts.set(r.company, (competitorCounts.get(r.company) ?? 0) + 1);
+    }
+
+    const all = [
+      { company: "AstraZeneca Indonesia", count: azCount, isAz: true },
+      ...[...competitorCounts.entries()].map(([company, count]) => ({
+        company,
+        count,
+        isAz: false,
+      })),
+    ];
+
+    const total = all.reduce((sum, r) => sum + r.count, 0);
+    return all
+      .sort((x, y) => y.count - x.count)
+      .map((r, i) => ({
+        rank: i + 1,
+        company: r.company,
+        count: r.count,
+        sharePct: total > 0 ? (r.count / total) * 100 : 0,
+        isAz: r.isAz,
+      }));
+  },
+
+  async topAzTopics(range, limit): Promise<TopAzTopic[]> {
+    const { articles } = await loadSnapshot();
+    const counts = new Map<string, number>();
+    for (const a of articles) {
+      if (a.category !== "About AstraZeneca") continue;
+      if (!inAnalyticsRange(a, range)) continue;
+      if (!a.keywords) continue;
+      // Per article: dedupe keyword duplicates supaya 1 artikel = 1 vote
+      // per kw (kalau LM kasih kw yang sama 2x, jangan double-count).
+      const seen = new Set<string>();
+      for (const kw of a.keywords.split(",")) {
+        const norm = kw.trim().toLowerCase();
+        if (!norm || seen.has(norm)) continue;
+        seen.add(norm);
+        counts.set(norm, (counts.get(norm) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .map(([keyword, count]) => ({ keyword, count }))
+      .sort((x, y) => y.count - x.count)
+      .slice(0, limit);
+  },
+
+  async dateBounds(): Promise<DateBounds> {
+    const { articles } = await loadSnapshot();
+    if (articles.length === 0) {
+      const y = new Date().getFullYear();
+      return { minYear: y, maxYear: y };
+    }
+    // Snapshot sudah sorted date desc → [0] = max, [last] = min.
+    const maxYear = Number(jakartaDate(articles[0].date).slice(0, 4));
+    const minYear = Number(jakartaDate(articles[articles.length - 1].date).slice(0, 4));
+    return { minYear, maxYear };
   },
 };

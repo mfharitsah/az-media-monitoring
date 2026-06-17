@@ -12,10 +12,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { CHART } from "@/lib/brand";
+import { BRAND, CHART } from "@/lib/brand";
 import type {
   SentimentTrendPoint,
   SubcategoryBreakdown,
+  TopAzTopic,
   TopProvince,
   TopSource,
 } from "@/lib/types";
@@ -133,6 +134,33 @@ export function TopSourcesChart({ data }: { data: TopSource[] }) {
         />
         <Tooltip />
         <Bar dataKey="count" fill={CHART.bar} radius={[0, 4, 4, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function TopAzTopicsChart({ data }: { data: TopAzTopic[] }) {
+  if (data.length === 0) {
+    return <EmptyState message="No AZ-related articles in this range yet." />;
+  }
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(200, data.length * 40)}>
+      <BarChart
+        data={data}
+        layout="vertical"
+        margin={{ top: 5, right: 30, left: 80, bottom: 5 }}
+      >
+        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+        <XAxis type="number" tick={{ fontSize: 12 }} allowDecimals={false} />
+        <YAxis
+          dataKey="keyword"
+          type="category"
+          tick={{ fontSize: 11 }}
+          width={140}
+          interval={0}
+        />
+        <Tooltip />
+        <Bar dataKey="count" fill={BRAND.mulberry} radius={[0, 4, 4, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
